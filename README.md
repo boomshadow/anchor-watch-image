@@ -1,12 +1,12 @@
 # anchor-watch-image
 
-Pre-built Docker image for running [Anchored Development](https://github.com/anchored-dev/anchored-development) drift detection in CI pipelines.
+Pre-built Docker image for running [Anchored Development](https://anchored-dev.org) drift detection in CI pipelines.
 
 ## What's in the image
 
 - `node:24-alpine` base
-- `git`, `curl`, `bash`
 - [Claude Code](https://claude.ai) CLI (pre-installed)
+- Common tools Claude may need during drift analysis (see [Dockerfile](Dockerfile))
 
 ## Usage
 
@@ -14,7 +14,7 @@ Reference the image in your CI pipeline instead of installing Claude Code on eve
 
 ```yaml
 anchor-watch:
-  image: registry.gitlab.com/YOUR_GROUP/anchor-watch-image:latest
+  image: registry.gitlab.com/boomshadow/anchor-watch-image:latest
   before_script:
     - cd ci && npm install && cd ..
   script:
