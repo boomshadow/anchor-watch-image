@@ -1,0 +1,78 @@
+############################
+# Setup
+############################
+image: docker:latest
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: never
+    - when: always
+
+############################
+# Stages
+############################
+stages:
+  - lint
+  - build
+
+############################
+# Lint
+############################
+lint:dockerfile:
+  stage: lint
+  image: hadolint/hadolint:latest-debian
+  script:
+    - hadolint Dockerfile --ignore DL3018 --ignore DL3059
+
+trivy:
+  stage: lint
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  script:
+    - trivy repo --exit-code 1 --scanners misconfig --ignorefile .trivyignore ./
+
+##############################
+# Docker/Build
+##############################
+# Base template for Docker jobs
+.docker:base:
+  stage: build
+  image: docker:27-dind
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+    - docker context create my-builder
+    - docker buildx create my-builder --driver docker-container --use
+  retry: 2
+
+# Build only (for non-main branches)
+docker:build:
+  extends: .docker:base
+  script:
+    - >
+      docker buildx build
+      --platform linux/amd64,linux/arm64
+      --tag $CI_REGISTRY_IMAGE:test
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache-image
+      --provenance=false
+      -f Dockerfile .
+  rules:
+    - if: $CI_COMMIT_REF_NAME != "main"
+
+# Build and push (for main branch only)
+docker:push:
+  extends: .docker:base
+  script:
+    - >
+      docker buildx build --push
+      --platform linux/amd64,linux/arm64
+      --tag $CI_REGISTRY_IMAGE:latest
+      --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache-image,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
+      --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache-image
+      --provenance=false
+      -f Dockerfile .
+  rules:
+    - if: $CI_COMMIT_REF_NAME == "main"

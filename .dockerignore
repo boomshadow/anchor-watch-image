@@ -1,0 +1,15 @@
+.git
+.gitignore
+.editorconfig
+.env
+.env.*
+CLAUDE.md
+README.md
+LICENSE
+*.md
+*.swp
+*.swo
+*~
+.DS_Store
+.idea/
+.vscode/

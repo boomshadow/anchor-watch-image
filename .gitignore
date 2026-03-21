@@ -1,0 +1,18 @@
+# OS files
+.DS_Store
+Thumbs.db
+._*
+
+# Editor and IDE files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
