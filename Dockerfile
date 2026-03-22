@@ -4,9 +4,11 @@ SHELL ["/bin/ash", "-eo", "pipefail", "-c"]
 
 RUN apk add --no-cache git curl bash jq yq
 
-RUN adduser -D anchor-watch
-USER anchor-watch
+WORKDIR /opt/sdk
+COPY package.json .
+RUN npm install \
+    && ln -s /opt/sdk/node_modules /node_modules
 
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-ENV PATH="/home/anchor-watch/.local/bin:${PATH}"
+ENV PATH="/root/.local/bin:${PATH}"
