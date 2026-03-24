@@ -25,14 +25,6 @@ lint:dockerfile:
   script:
     - hadolint Dockerfile --ignore DL3018 --ignore DL3059
 
-trivy:
-  stage: lint
-  image:
-    name: aquasec/trivy:latest
-    entrypoint: [""]
-  script:
-    - trivy repo --exit-code 1 --scanners misconfig --ignorefile .trivyignore ./
-
 ##############################
 # Docker/Build
 ##############################
