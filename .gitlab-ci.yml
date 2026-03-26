@@ -21,9 +21,9 @@ stages:
 ############################
 lint:dockerfile:
   stage: lint
-  image: hadolint/hadolint:latest-debian
+  image: hadolint/hadolint:v2.14.0-alpine@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c
   script:
-    - hadolint Dockerfile --ignore DL3018 --ignore DL3059
+    - hadolint Dockerfile --ignore DL3008 --ignore DL3015
 
 ##############################
 # Docker/Build
@@ -31,7 +31,7 @@ lint:dockerfile:
 # Base template for Docker jobs
 .docker:base:
   stage: build
-  image: docker:27-dind
+  image: docker:29.2.1-dind-alpine3.23@sha256:68f6d9ab84623d1116c5432a3b924a07ee09960e6129ca1cb03ef14010588cb4
   services:
     - docker:dind
   before_script:
