@@ -63,11 +63,12 @@ lint:dockerfile:
   extends: .rules-validate
   stage: lint
   image: hadolint/hadolint:v2.14.0-alpine@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c
-  # DL3008 (pin apt versions) is ignored deliberately -- see the Dockerfile comment:
-  # Debian drops old package versions from the archive, so pinning breaks builds on
-  # someone else's schedule. The base-image digest bump is the refresh mechanism.
+  # DL3018 (pin apk versions) is ignored deliberately -- see the Dockerfile comment:
+  # Alpine drops old package versions from the repository as it moves, so pinning
+  # breaks builds on someone else's schedule. The base-image digest bump is the
+  # refresh mechanism.
   script:
-    - hadolint Dockerfile --ignore DL3008 --ignore DL3015
+    - hadolint Dockerfile --ignore DL3018
 
 ##############################
 # Docker/Build
@@ -153,6 +154,63 @@ docker:push:
     - if: $CI_PIPELINE_SOURCE == "schedule"
       variables:
         CONTAINER_SCAN_IMAGE: "$CI_REGISTRY_IMAGE:latest"
+
+# Governance gate for .grype.yaml. Grype's IgnoreRule schema has no native expiry
+# field, so an exception list silently rots: a CVE ruled "not reachable" a year ago
+# may be reachable now. This job requires every ignore rule's `reason` to carry an
+# [expires:YYYY-MM-DD] tag and fails once one lapses, forcing re-review. Distinct
+# from the scan jobs -- it gates the exceptions, not the findings.
+security:exception-audit:
+  stage: security
+  image:
+    name: mikefarah/yq:4.53.2@sha256:0cb4a78491b6e62ee8a9bf4fbeacbd15b5013d19bc420591b05383a696315e60
+    entrypoint: [""]
+  script:
+    - |
+      set -eu
+      CONFIG=".grype.yaml"
+      if [ ! -f "$CONFIG" ]; then
+        echo "[audit] No $CONFIG in repo -- nothing to audit."
+        exit 0
+      fi
+      count=$(yq '.ignore | length // 0' "$CONFIG")
+      if [ "$count" = "0" ] || [ "$count" = "null" ]; then
+        echo "[audit] $CONFIG has no ignore rules. Nothing to audit."
+        exit 0
+      fi
+      today=$(date -u +%Y-%m-%d)
+      ok=0; expired=0; missing=0; i=0
+      while [ "$i" -lt "$count" ]; do
+        reason=$(yq ".ignore[$i].reason // \"\"" "$CONFIG")
+        expires=$(printf "%s" "$reason" | grep -oE '\[expires:[0-9]{4}-[0-9]{2}-[0-9]{2}\]' | head -1 | sed 's/\[expires:\(.*\)\]/\1/')
+        if [ -z "$expires" ]; then
+          echo "[audit] FAIL -- rule #$i is missing [expires:YYYY-MM-DD] in its reason"
+          echo "         reason: $reason"
+          missing=$((missing + 1))
+        elif [ "$expires" \< "$today" ]; then
+          echo "[audit] FAIL -- rule #$i expired on $expires (today: $today)"
+          echo "         reason: $reason"
+          expired=$((expired + 1))
+        else
+          ok=$((ok + 1))
+        fi
+        i=$((i + 1))
+      done
+      echo ""
+      echo "[audit] Summary: $ok valid, $expired expired, $missing missing expiry tag"
+      if [ "$expired" -gt 0 ] || [ "$missing" -gt 0 ]; then
+        echo ""
+        echo "[audit] EXCEPTION AUDIT FAILED. Either renew the exception (push"
+        echo "[audit] [expires:YYYY-MM-DD] forward in $CONFIG) or drop the rule and"
+        echo "[audit] address the underlying finding."
+        exit 1
+      fi
+      echo "[audit] All exceptions are within their review window."
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "schedule"
 
 # Lock-file scan. Cheap and needs no built image, so it runs on merge requests too
 # -- this is the gate that catches a bad npm dependency before it is merged.

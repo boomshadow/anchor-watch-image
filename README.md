@@ -4,12 +4,12 @@ Pre-built Docker image for running [Anchored Development](https://anchored-dev.o
 
 ## What's in the image
 
-- `node:24.14.0-trixie-slim` base (Debian), digest-pinned
-- [Claude Code](https://claude.ai) CLI, version-pinned
+- `node:24.16.0-alpine3.23` base, digest-pinned
+- [Claude Code](https://claude.ai) CLI, version-pinned (the official musl build)
 - [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk),
   installed at `/opt/sdk` and symlinked to `/node_modules` so drift-detector scripts resolve it
   without a per-run `npm install`
-- `git`, `curl`, `jq`, `yq` (see [Dockerfile](Dockerfile))
+- `bash`, `git`, `curl`, `jq` (see [Dockerfile](Dockerfile))
 
 ## Usage
 
@@ -17,7 +17,7 @@ Pin the version tag **and** the digest:
 
 ```yaml
 anchor-watch:
-  image: registry.gitlab.com/boomshadow/anchor-watch-image:1.0.0@sha256:<digest>
+  image: registry.gitlab.com/boomshadow/anchor-watch-image:2.0.0@sha256:<digest>
   script:
     - node .claude/agents/scripts/ci-drift-detector.mjs
 ```
@@ -25,7 +25,7 @@ anchor-watch:
 The digest is printed by the release pipeline, and is also visible via:
 
 ```sh
-docker buildx imagetools inspect registry.gitlab.com/boomshadow/anchor-watch-image:1.0.0
+docker buildx imagetools inspect registry.gitlab.com/boomshadow/anchor-watch-image:2.0.0
 ```
 
 **Pin the tag, not just the digest.** A digest-only reference (`@sha256:…` with no tag) points at a
@@ -65,17 +65,25 @@ nothing except the manifest digest, which is precisely what breaks downstream pi
 | Claude Code CLI | exact version | Renovate |
 | Build toolchain (dind, BuildKit) | digest | Renovate |
 | Scanner images (Syft, Grype) | digest | Renovate |
-| `apt-get install` packages | **unpinned, deliberately** | base image digest bump |
+| `apk` packages | **unpinned, deliberately** | base image digest bump |
 
-Debian drops old package versions from the archive on every point release, so pinning them breaks builds
-on a schedule nobody controls. Instead, the base-image digest bump changes the layer cache key, which
-rebuilds the `apt-get install` layer against the current archive — and the weekly Grype scan is what
-tells us when that bump is overdue.
+Alpine drops old package versions from its repository as it moves, so pinning them breaks builds on a
+schedule nobody controls. Instead, the build runs `apk upgrade` (which patches packages the base image
+already shipped) and the base-image digest bump changes the layer cache key, rebuilding that layer
+against the current repository — while the weekly Grype scan is what tells us when the bump is overdue.
+
+Note the limit of that mechanism: the `apk` layer is cached, so it only re-runs when the base digest
+changes. `apk upgrade` improves the starting point; it does not make a stale pin self-healing.
 
 ## Security scanning
 
 Every pipeline runs Grype against the lockfile. Release and weekly-schedule pipelines additionally build
 a Syft SBOM of the published image and scan it. High and Critical findings fail the job.
+
+Accepted exceptions live in [`.grype.yaml`](.grype.yaml), one entry per CVE with a reachability
+rationale, so a *new* finding in an already-excepted package still fails rather than hiding behind a
+blanket rule. Every entry carries an `[expires:YYYY-MM-DD]` tag, and the `security:exception-audit` job
+fails the build once one lapses — forcing the exception back into review instead of letting it rot.
 
 ## Building locally
 

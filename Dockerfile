@@ -1,19 +1,30 @@
+# Alpine, not Debian. Measured on the same contents: Debian slim carried 135
+# High/Critical findings, Alpine carries 38 -- a 72% smaller surface, mostly
+# because Alpine simply ships far fewer packages. The Claude Code CLI has an
+# official musl build (`linux-{x64,arm64}-musl`) and install.sh detects musl
+# itself, so nothing about the runtime is unofficial.
+#
 # Base image is digest-pinned. Renovate bumps the digest, and that bump is what
-# actually refreshes the apt packages below: a new base changes the layer cache
-# key, so the `apt-get install` layer is rebuilt against the current archive.
-FROM node:24.14.0-trixie-slim@sha256:8c8f12cedb96c3b59642cf30d713943c2b223990c9919b96a141681f62e6e292
+# refreshes the OS packages below: a new base changes the layer cache key, so the
+# apk layer is rebuilt against the current Alpine repository.
+FROM node:24.16.0-alpine3.23@sha256:2bdb65ed1dab192432bc31c95f94155ca5ad7fc1392fb7eb7526ab682fa5bf14
+
+# `apk upgrade` first: the base image is a point-in-time snapshot, so packages it
+# already contains (openssl, libcrypto) can carry fixed CVEs that `apk add` alone
+# would never touch. Upgrading at build time clears those. Same pattern as the
+# encodinator dashboard image.
+#
+# Deliberately NOT version-pinned. Alpine drops old package versions from the
+# repository as it moves, so pinning here breaks the build on a schedule nobody
+# controls. The supply-chain control for this layer is the digest-pinned base above
+# plus the weekly Grype scan, which is what tells us when that base bump is overdue.
+# hadolint DL3018 is ignored in CI for this reason.
+#
+# bash is required: the SHELL directive below and the Claude installer both need it.
+RUN apk upgrade --no-cache \
+    && apk add --no-cache bash git curl jq
 
 SHELL ["/bin/bash", "-eo", "pipefail", "-c"]
-
-# Deliberately NOT version-pinned. Debian drops old package versions from the
-# archive on every point release, so pinning here breaks the build on a schedule
-# nobody controls. The supply-chain control for this layer is the digest-pinned
-# base above (which carries Debian's own patched packages) plus the weekly Grype
-# scan, which is what tells us when that base bump is overdue. hadolint DL3008 is
-# ignored in CI for this reason.
-RUN apt-get update && apt-get install -y \
-    git curl jq yq \
-    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/sdk
 COPY package.json package-lock.json ./
