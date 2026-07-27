@@ -1,11 +1,28 @@
 ############################
 # Setup
 ############################
+# Release model: this image publishes ONLY from a git tag. A tag pipeline pushes
+# an immutable semver tag (e.g. `1.0.0`) plus `:latest`; nothing else ever pushes.
+#
+# Why it matters: consumers pin `image:<version>@sha256:<digest>`. An untagged
+# manifest on GitLab.com is garbage-collected ~24h after it stops being referenced,
+# so a moving `:latest` used to silently delete the digest every consumer was pinned
+# to. An immutable version tag keeps its manifest alive forever, so a pin can go
+# stale but can never break.
+#
+# Freshness comes from Renovate (base-image digest, npm deps, Claude CLI version),
+# not from rebuilding on a timer. A timed rebuild replayed cached layers and changed
+# nothing but the manifest digest -- which is exactly what broke consumers. The
+# weekly schedule now runs the security scans against the published image instead.
 workflow:
   rules:
+    # Release: a git tag is the only thing that publishes.
+    - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # Never run a branch pipeline and an MR pipeline for the same commit.
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
       when: never
-    - when: always
+    - if: $CI_COMMIT_BRANCH
 
 ############################
 # Stages
@@ -13,34 +30,76 @@ workflow:
 stages:
   - lint
   - build
+  - security
+
+############################
+# Variables
+############################
+variables:
+  # Fail the scan gate on High and Critical. Mediums/Lows are reported, not gating
+  # -- same threshold the consuming repos use.
+  GRYPE_FAIL_SEVERITY: "high"
+  SYFT_EXTRA_ARGS: ""
+  GRYPE_EXTRA_ARGS: ""
+
+############################
+# Shared rules
+############################
+# Validation work: merge requests and branch pushes, never on the weekly schedule.
+# A scheduled pipeline is the security rescan -- it must not rebuild or re-lint.
+.rules-validate:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
 
 ############################
 # Lint
 ############################
 lint:dockerfile:
+  extends: .rules-validate
   stage: lint
   image: hadolint/hadolint:v2.14.0-alpine@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c
+  # DL3008 (pin apt versions) is ignored deliberately -- see the Dockerfile comment:
+  # Debian drops old package versions from the archive, so pinning breaks builds on
+  # someone else's schedule. The base-image digest bump is the refresh mechanism.
   script:
     - hadolint Dockerfile --ignore DL3008 --ignore DL3015
 
 ##############################
 # Docker/Build
 ##############################
-# Base template for Docker jobs
+# Base template for Docker jobs.
+#
+# Both the dind service and BuildKit are digest-pinned. They used to float, and that
+# is what silently changed the published manifest digest on 2026-07-21 even though
+# the image contents were byte-identical: same layers, same config, different
+# manifest serialization. An unpinned builder makes builds non-reproducible in a way
+# that is invisible until it breaks a downstream pin.
 .docker:base:
   stage: build
   image: docker:29.2.1-dind-alpine3.23@sha256:68f6d9ab84623d1116c5432a3b924a07ee09960e6129ca1cb03ef14010588cb4
   services:
-    - docker:dind
+    - name: docker:29.2.1-dind-alpine3.23@sha256:68f6d9ab84623d1116c5432a3b924a07ee09960e6129ca1cb03ef14010588cb4
+      alias: docker
   before_script:
     - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
     - docker context create my-builder
-    - docker buildx create my-builder --driver docker-container --use
+    - >
+      docker buildx create my-builder --driver docker-container --use
+      --driver-opt image=moby/buildkit:v0.30.0@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
   retry: 2
 
-# Build only (for non-main branches)
+# Validate the build on merge requests and branches. Deliberately does NOT push:
+# only a tag publishes. `--provenance=false` keeps the output a plain manifest list
+# rather than an attestation-bearing index.
 docker:build:
-  extends: .docker:base
+  extends:
+    - .docker:base
+    - .rules-validate
   script:
     - >
       docker buildx build
@@ -49,20 +108,140 @@ docker:build:
       --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache-image
       --provenance=false
       -f Dockerfile .
-  rules:
-    - if: $CI_COMMIT_REF_NAME != "main"
 
-# Build and push (for main branch only)
+# Publish a release. Tag pipelines only.
 docker:push:
   extends: .docker:base
   script:
     - >
       docker buildx build --push
       --platform linux/amd64,linux/arm64
+      --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
       --tag $CI_REGISTRY_IMAGE:latest
       --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache-image,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
       --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache-image
       --provenance=false
       -f Dockerfile .
+    # Print the published manifest digest -- this is what consumers pin alongside
+    # the version tag.
+    - docker buildx imagetools inspect $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG --format '{{.Manifest.Digest}}'
   rules:
-    - if: $CI_COMMIT_REF_NAME == "main"
+    - if: $CI_COMMIT_TAG
+
+##############################
+# Security
+##############################
+# These jobs are INLINED rather than included from the private
+# boomshadow_private/personal/ci-templates project, and that is deliberate.
+# `include: project:` is resolved with the permissions of the user running the
+# pipeline: anyone without at least Reporter on the included project gets
+# "not found or access denied" and the pipeline fails to even be created. On a
+# public repo that means no outside contributor could ever run CI, and it would
+# publish a private group path in a public file. Keeping the jobs here also makes
+# this repo a self-contained reference for anyone adopting the framework.
+#
+# Scanner images stay digest-pinned and are maintained by Renovate.
+
+# Which image the container scan looks at:
+#   release pipeline -> the tag just pushed
+#   weekly schedule  -> whatever :latest currently resolves to
+.scan-target:
+  rules:
+    - if: $CI_COMMIT_TAG
+      variables:
+        CONTAINER_SCAN_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      variables:
+        CONTAINER_SCAN_IMAGE: "$CI_REGISTRY_IMAGE:latest"
+
+# Lock-file scan. Cheap and needs no built image, so it runs on merge requests too
+# -- this is the gate that catches a bad npm dependency before it is merged.
+security:dependencies:
+  stage: security
+  image:
+    # -debug variant includes busybox sh (the default image is FROM scratch;
+    # GitLab's Docker executor requires a shell in the job image).
+    name: anchore/grype:v0.112.0-debug@sha256:6dd8406a9a52780551a749b3088d33babc8bd8abf6316806acbbdf2c106551bf
+    entrypoint: [""]
+  # --only-fixed is intentionally NOT used: malware advisories (e.g. a compromised
+  # release) have no fix version, so --only-fixed would drop them before --fail-on
+  # could gate on them.
+  script:
+    - >-
+      /grype dir:.
+      --fail-on "${GRYPE_FAIL_SEVERITY}"
+      --output json
+      --file grype-dependency-results.json
+      ${GRYPE_EXTRA_ARGS}
+    - >-
+      /grype dir:.
+      --fail-on "${GRYPE_FAIL_SEVERITY}"
+      --output table
+      ${GRYPE_EXTRA_ARGS}
+  artifacts:
+    when: always
+    paths:
+      - grype-dependency-results.json
+    expire_in: 30 days
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# SBOM of the published image.
+security:sbom:
+  extends: .scan-target
+  stage: security
+  image:
+    name: anchore/syft:v1.44.0-debug@sha256:6dd8fb28e1b799e7cadaff6be2ec6d555757c4eeec0c0e48162f20b042ffa1ff
+    entrypoint: [""]
+  variables:
+    SYFT_REGISTRY_AUTH_AUTHORITY: "${CI_REGISTRY}"
+    SYFT_REGISTRY_AUTH_USERNAME: "${CI_REGISTRY_USER}"
+    SYFT_REGISTRY_AUTH_PASSWORD: "${CI_REGISTRY_PASSWORD}"
+  script:
+    # /syft because the binary is at filesystem root in the debug image and / is
+    # not in PATH.
+    - >-
+      /syft "registry:${CONTAINER_SCAN_IMAGE}"
+      --output cyclonedx-json=sbom.cdx.json
+      --output syft-json=sbom.syft.json
+      ${SYFT_EXTRA_ARGS}
+  artifacts:
+    when: always
+    paths:
+      - sbom.cdx.json
+      - sbom.syft.json
+    expire_in: 45 days
+
+# Vulnerability scan of that SBOM. This is the job that replaces the old weekly
+# rebuild: on the schedule it tells us when the pinned base image has aged into
+# known CVEs, which is the signal to take Renovate's base-digest bump and cut a
+# release.
+security:container:
+  extends: .scan-target
+  stage: security
+  image:
+    name: anchore/grype:v0.112.0-debug@sha256:6dd8406a9a52780551a749b3088d33babc8bd8abf6316806acbbdf2c106551bf
+    entrypoint: [""]
+  needs:
+    - job: security:sbom
+      artifacts: true
+  script:
+    - >-
+      /grype sbom:sbom.syft.json
+      --fail-on "${GRYPE_FAIL_SEVERITY}"
+      --output json
+      --file grype-container-results.json
+      ${GRYPE_EXTRA_ARGS}
+    - >-
+      /grype sbom:sbom.syft.json
+      --fail-on "${GRYPE_FAIL_SEVERITY}"
+      --output table
+      ${GRYPE_EXTRA_ARGS}
+  artifacts:
+    when: always
+    paths:
+      - grype-container-results.json
+    expire_in: 30 days
