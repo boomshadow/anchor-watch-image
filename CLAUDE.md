@@ -2,7 +2,7 @@
 
 This repo builds and publishes the Docker image used by Anchored Development drift
 detection CI jobs. The image pre-installs the Claude Code CLI and the Claude Agent
-SDK on `node:24.16.0-alpine3.23` so consuming pipelines don't install them on every
+SDK on `node:24.18.0-alpine3.23` so consuming pipelines don't install them on every
 run. The CLI is the official musl build; install.sh detects musl on its own.
 
 This is a **public** repo, mirrored to GitHub, and the image is pulled by projects
