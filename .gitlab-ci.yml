@@ -219,7 +219,7 @@ security:dependencies:
   image:
     # -debug variant includes busybox sh (the default image is FROM scratch;
     # GitLab's Docker executor requires a shell in the job image).
-    name: anchore/grype:v0.112.0-debug@sha256:6dd8406a9a52780551a749b3088d33babc8bd8abf6316806acbbdf2c106551bf
+    name: anchore/grype:v0.114.0-debug@sha256:c7a0a7fdb173e2a3cd71946be01dd3247782299b3c01e4cbff9aa426e073ba5f
     entrypoint: [""]
   # --only-fixed is intentionally NOT used: malware advisories (e.g. a compromised
   # release) have no fix version, so --only-fixed would drop them before --fail-on
@@ -281,7 +281,7 @@ security:container:
   extends: .scan-target
   stage: security
   image:
-    name: anchore/grype:v0.112.0-debug@sha256:6dd8406a9a52780551a749b3088d33babc8bd8abf6316806acbbdf2c106551bf
+    name: anchore/grype:v0.114.0-debug@sha256:c7a0a7fdb173e2a3cd71946be01dd3247782299b3c01e4cbff9aa426e073ba5f
     entrypoint: [""]
   needs:
     - job: security:sbom
