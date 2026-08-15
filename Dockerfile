@@ -38,7 +38,7 @@ RUN npm ci \
 # via the `RUN <NAME>_VERSION=` custom manager; the CLI shares its version line with
 # the @anthropic-ai/claude-code npm package, which is what that datasource tracks.
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-RUN CLAUDE_CODE_VERSION="2.1.187" \
+RUN CLAUDE_CODE_VERSION="2.1.197" \
     && curl -fsSL https://claude.ai/install.sh | bash -s "${CLAUDE_CODE_VERSION}"
 
 ENV PATH="/root/.local/bin:${PATH}"
