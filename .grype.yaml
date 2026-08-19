@@ -80,6 +80,30 @@ ignore:
     reason: "curl WebSocket PING auto-response memory exhaustion from a malicious server; image never uses curl's ws/wss support; no fixed Alpine package [expires:2026-10-24]"
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # openssl 3.5.7-r0 (apk), shipped as libssl3 + libcrypto3.
+  #
+  # Unlike the curl block above, the vulnerable code IS compiled into the shipped
+  # library -- OSSL_QUIC_server_method, SSL_new_listener and SSL_accept_connection
+  # all resolve in /usr/lib/libssl.so.3 -- so this exception rests on the caller
+  # side instead: nothing in the image ever creates a QUIC listener. Verified
+  # against the published image:
+  #   * only TWO binaries link libssl3 -- curl and apk, both clients. git links
+  #     neither directly, and curl has no HTTP3/QUIC anyway (absent from
+  #     `curl -V` Features, same evidence the curl block above cites).
+  #   * node does NOT link system OpenSSL at all -- `ldd $(command -v node)` shows
+  #     no libssl/libcrypto. It carries its own bundled 3.5.7, and that build
+  #     reports EMPTY ngtcp2 and nghttp3 versions, so node's QUIC is absent too.
+  #
+  # A base-image bump is NOT the escape hatch here: OpenSSL rates this LOW and
+  # deliberately shipped no release for it (3.5.8 is pending), so Alpine has no
+  # fixed package on v3.23 OR edge -- both are still 3.5.7-r0. Grype matches it
+  # through nvd:cpe rather than Alpine's secdb, which is why the fix state reads
+  # `unknown`. Revisit once OpenSSL cuts 3.5.8 and Alpine packages it.
+  # ─────────────────────────────────────────────────────────────────────────────
+  - vulnerability: CVE-2026-14456
+    reason: "OpenSSL QUIC server queues unlimited pending connections from Initial packets, letting a remote peer exhaust listener memory (DoS); reachable only from an application that creates a QUIC listener via SSL_new_listener/OSSL_QUIC_server_method, and this image runs no server of any kind -- the only binaries linking libssl3 are curl (built without HTTP3/QUIC) and apk, both clients, while node does not link system OpenSSL at all; upstream rates it LOW and published no release, so no fixed Alpine package exists on v3.23 or edge and a base bump does not clear it [expires:2026-10-24]"
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # git 2.52.0-r0 (apk)
   # ─────────────────────────────────────────────────────────────────────────────
   - vulnerability: CVE-2026-32631
