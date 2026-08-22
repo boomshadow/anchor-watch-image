@@ -24,6 +24,10 @@ workflow:
       when: never
     - if: $CI_COMMIT_BRANCH
 
+# Auto-cancel pipelines superseded by a newer commit on the same branch.
+default:
+  interruptible: true
+
 ############################
 # Stages
 ############################
@@ -113,6 +117,8 @@ docker:build:
 # Publish a release. Tag pipelines only.
 docker:push:
   extends: .docker:base
+  # Publishes the release image other repos digest-pin. A release is not a retry.
+  interruptible: false
   script:
     - >
       docker buildx build --push
