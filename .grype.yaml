@@ -15,7 +15,9 @@
 # repository already checked out by the runner. Its only outbound traffic is HTTPS
 # to the Anthropic API and to package/registry hosts, all trusted origins. No proxy,
 # no .netrc, no mTLS client config, and no libcurl-based application -- curl is only
-# ever invoked as a CLI.
+# ever invoked as a CLI. It also carries no package manager: npm, npx, yarn and
+# corepack live in the build stage only, so nothing under a package manager's own
+# vendored tree can ever appear in a finding here.
 #
 # Scans intentionally do NOT pass --only-fixed, so no-fix malware advisories still
 # gate. These are deliberate, reviewed exceptions, not a blanket.
@@ -104,70 +106,23 @@ ignore:
     reason: "OpenSSL QUIC server queues unlimited pending connections from Initial packets, letting a remote peer exhaust listener memory (DoS); reachable only from an application that creates a QUIC listener via SSL_new_listener/OSSL_QUIC_server_method, and this image runs no server of any kind -- the only binaries linking libssl3 are curl (built without HTTP3/QUIC) and apk, both clients, while node does not link system OpenSSL at all; upstream rates it LOW and published no release, so no fixed Alpine package exists on v3.23 or edge and a base bump does not clear it [expires:2026-10-24]"
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # git 2.52.0-r0 (apk)
-  # ─────────────────────────────────────────────────────────────────────────────
-  - vulnerability: CVE-2026-32631
-    reason: "Git for WINDOWS NTLM hash disclosure; advisory is explicitly scoped to Git for Windows (fix is 2.53.0.windows.3) and this is a Linux/musl image, so it is not applicable rather than merely unreachable; no fixed Alpine package [expires:2026-10-24]"
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # node 24.18.0 binary, group 1 of 2 -- NO fixed release exists on any line for
-  # these yet. They clear on a future base-image bump, which is what the shorter
-  # expiry is for.
-  # ─────────────────────────────────────────────────────────────────────────────
-  - vulnerability: CVE-2026-48930
-    reason: "Node TLS embedded-nul hostname authority rebinding; image makes outbound TLS only to hostnames it hardcodes (Anthropic API, registries), never to an attacker-supplied hostname; affects all release lines with no published fix; revisit on base bump [expires:2026-09-24]"
-  - vulnerability: CVE-2026-48933
-    reason: "Node subtle.encrypt() crash on input that is a multiple of 2GiB (DoS); drift detection encrypts nothing and processes no 2GiB buffers; affects all release lines with no published fix; revisit on base bump [expires:2026-09-24]"
-  - vulnerability: CVE-2026-48619
-    reason: "Node HTTP/2 client OOM from unlimited server ORIGIN frames; drift detector speaks HTTPS/1.1 to the Anthropic API and opens no HTTP/2 client sessions to untrusted servers; affects all release lines with no published fix; revisit on base bump [expires:2026-09-24]"
-  - vulnerability: CVE-2026-48615
-    reason: "Node exposes proxy credentials in ERR_PROXY_TUNNEL error messages; image configures no proxy and embeds no proxy credentials; affects all release lines with no published fix; revisit on base bump [expires:2026-09-24]"
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # node 24.18.0 binary, group 2 of 2 -- the July 2026 security release. Unlike
-  # the block above these DO have a fix (24.18.1, released 2026-07-28), but its image
-  # (node:24.18.1-alpine3.23, pushed 2026-07-30) is short of the 45-day soak
-  # window until 2026-09-13. 24.18.0 is the newest base that has soaked. Take
-  # 24.18.1+ at expiry and drop these three.
+  # node 24.18.0 binary -- the July 2026 security release. These DO have a fix
+  # (24.18.1, released 2026-07-28), but its image (node:24.18.1-alpine3.23, pushed
+  # 2026-07-30) is short of the 45-day soak window until 2026-09-13. 24.18.0 is the
+  # newest base that has soaked. Take 24.18.1+ at expiry and drop these three.
   # ─────────────────────────────────────────────────────────────────────────────
   - vulnerability: CVE-2026-58043
     reason: "Node Permission Model path matching over-grants filesystem access; the permission model is opt-in and this image never runs node with --permission (entrypoint is a plain `node <script>.mjs`), so there is no allowlist to over-grant; fixed in 24.18.1 which soaks 2026-09-13 [expires:2026-09-24]"
   - vulnerability: CVE-2026-56846
     reason: "Node HTTP/2 retained header blocks bypass maxSessionMemory (DoS); this is a server-side memory limit and the image runs no server of any kind -- it is a one-shot CI job that exits; fixed in 24.18.1 which soaks 2026-09-13 [expires:2026-09-24]"
   - vulnerability: CVE-2026-56848
-    reason: "Node HTTP/2 re-entrant send causes heap use-after-free in nghttp2; requires an active HTTP/2 session and the drift detector opens none -- it speaks HTTPS/1.1 to the Anthropic API and runs no server (same premise as CVE-2026-48619 above); fixed in 24.18.1 which soaks 2026-09-13 [expires:2026-09-24]"
+    reason: "Node HTTP/2 re-entrant send causes heap use-after-free in nghttp2; requires an active HTTP/2 session and the drift detector opens none -- it speaks HTTPS/1.1 to the Anthropic API and runs no server; fixed in 24.18.1 which soaks 2026-09-13 [expires:2026-09-24]"
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # npm's OWN vendored dependencies, at /usr/local/lib/node_modules/npm/**. These
-  # ship inside the official node image and we do not control their versions --
-  # they are not in package-lock.json and `npm update` cannot touch them. For most
-  # of these no *soaked* node base carries the fix yet; for brace-expansion and
-  # ip-address no node base carries it AT ALL (verified against 24.18.0, 24.18.1
-  # and 24.19.0), so a base bump is not the escape hatch there. npm is a BUILD-TIME
-  # tool here -- `npm ci` runs during docker build and npm is never invoked at
-  # runtime, where the entrypoint is `node <script>.mjs`. Short expiry so a soaked
-  # node bump is reconsidered promptly.
-  # ─────────────────────────────────────────────────────────────────────────────
-  - vulnerability: GHSA-23hp-3jrh-7fpw
-    reason: "node-tar decompression/parse DoS, inside npm's bundled node_modules; npm is build-time only and extracts only registry tarballs verified against package-lock integrity hashes; fix 7.5.19 not present in any soaked node base; revisit on base bump [expires:2026-09-24]"
-  - vulnerability: GHSA-8x88-c5mf-7j5w
-    reason: "node-tar infinite loop on negative entry size during archive replace, inside npm's bundled node_modules; npm is build-time only and never rewrites archives; fix 7.5.18 not present in any soaked node base; revisit on base bump [expires:2026-09-24]"
-  - vulnerability: GHSA-mh99-v99m-4gvg
-    reason: "brace-expansion OOM via unbounded expansion, inside npm's bundled node_modules; npm is build-time only and expands no attacker-supplied globs; fix 5.0.8 not present in any soaked node base; revisit on base bump [expires:2026-09-24]"
-  - vulnerability: GHSA-3jxr-9vmj-r5cp
-    reason: "brace-expansion exponential-time expansion DoS, inside npm's bundled node_modules; npm is build-time only and expands no attacker-supplied globs; fix 5.0.7 not present in any soaked node base; revisit on base bump [expires:2026-09-24]"
-  - vulnerability: GHSA-vxpw-j846-p89q
-    reason: "undici WebSocket DoS via fragment count bypass, inside npm's bundled node_modules; npm is build-time only and opens no WebSockets; fix 6.27.0 not present in any soaked node base; revisit on base bump [expires:2026-09-24]"
-  - vulnerability: GHSA-rgw5-rvv9-x895
-    reason: "brace-expansion unbounded intermediate arrays DoS (bypasses the CVE-2026-14257 fix), inside npm's bundled node_modules; npm is build-time only and expands no attacker-supplied globs; fix 5.0.9 is in NO published node image -- even 24.19.0 ships 5.0.6 -- so no base bump clears it; revisit when a node base ships npm with 5.0.9 [expires:2026-09-24]"
-  - vulnerability: GHSA-mwp4-54f8-5fhr
-    reason: "ip-address parses leading-zero octets as decimal while resolvers read them as octal, bypassing SSRF/trust-boundary checks, inside npm's bundled node_modules; npm reaches it via socks-proxy-agent and this image configures no proxy, runs npm at build time only, and contacts only the registry -- nothing here uses ip-address for host-based policy; fix 10.3.1 is in NO published node image -- even 24.19.0 ships 10.2.0 -- so no base bump clears it [expires:2026-09-24]"
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # OUR OWN npm tree, at /opt/sdk/node_modules. Unlike the npm-vendored block
-  # above this IS ours to fix -- a package-lock refresh takes it -- so the only
-  # thing holding the fix back is the 45-day soak. Take the bump at expiry rather
-  # than renewing.
+  # Our npm tree, at /opt/sdk/node_modules. This is the only JavaScript in the
+  # runtime image, and it IS ours to fix -- a package-lock refresh takes it -- so
+  # the only thing holding the fix back is the 45-day soak. Take the bump at expiry
+  # rather than renewing.
   # ─────────────────────────────────────────────────────────────────────────────
   - vulnerability: GHSA-7p8r-x3mc-p8w7
     reason: "fast-uri treats a backslash as a normal character where Node's WHATWG URL parser treats it as an authority introducer, so a host-policy check can disagree with the URL actually fetched; exploitation requires using fast-uri to enforce host-based policy (allowlist, SSRF filter, redirect validation) and this image's only consumer is ajv, which uses it to resolve JSON-Schema $id/$ref identifiers -- registry keys that are never fetched -- against the Agent SDK's own bundled schemas, not attacker input; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.5 published 2026-07-31 and soaks 2026-09-14 [expires:2026-09-24]"

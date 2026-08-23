@@ -1,9 +1,14 @@
 # Claude instructions
 
 This repo builds and publishes the Docker image used by Anchored Development drift
-detection CI jobs. The image pre-installs the Claude Code CLI and the Claude Agent
-SDK on `node:24.18.0-alpine3.23` so consuming pipelines don't install them on every
-run. The CLI is the official musl build; install.sh detects musl on its own.
+detection CI jobs. The image pre-installs the Claude Agent SDK so consuming pipelines
+don't install it on every run. Claude Code itself is the official musl binary the SDK
+vendors as a platform-specific optional dependency — it is what the SDK spawns, and it
+is symlinked onto `PATH` as `claude`.
+
+The build is two-stage: `npm ci` runs in a `node:24.18.0-alpine3.23` stage, and the
+runtime is bare `alpine:3.23` with the `node` binary copied in. npm is build-time only,
+so the runtime image ships no package manager.
 
 This is a **public** repo, mirrored to GitHub, and the image is pulled by projects
 outside this namespace. Treat it as a reference implementation.
@@ -13,7 +18,8 @@ outside this namespace. Treat it as a reference implementation.
 - `Dockerfile` — the image definition
 - `.gitlab-ci.yml` — lint, build, release-on-tag, and security scanning
 - `.grype.yaml` — accepted, dated vulnerability exceptions
-- `package.json` / `package-lock.json` — the Agent SDK baked into the image
+- `package.json` / `package-lock.json` — the Agent SDK baked into the image, and with
+  it the Claude Code binary (an SDK platform package, integrity-hashed in the lockfile)
 
 ## Release model
 
@@ -28,11 +34,16 @@ being referenced, which silently breaks every consumer pinned to them.
 
 ## Conventions
 
-- Keep the image minimal. Only add packages required at runtime.
+- Keep the image minimal. Only add packages required at runtime. Anything needed just
+  to build belongs in the build stage, where it never reaches a published layer or an
+  SBOM.
 - **Pin everything that comes from outside the project**, by digest where the
-  ecosystem has one: base image, build toolchain (dind and BuildKit), scanner images,
-  npm deps (exact versions, lockfile integrity hashes), and the Claude Code CLI
-  version.
+  ecosystem has one: both base images, build toolchain (dind and BuildKit), scanner
+  images, and npm deps (exact versions, lockfile integrity hashes — this covers Claude
+  Code itself, which ships as the Agent SDK's platform package).
+- **Never `--omit=optional` on `npm ci`.** Claude Code is a platform-specific
+  optionalDependency of the Agent SDK; omitting it builds an image that fails at spawn
+  time rather than at build time.
 - **The one deliberate exception is `apk`.** Alpine removes old package versions from
   its repository as it moves, so version-pinning them breaks builds unpredictably. The
   refresh path is `apk upgrade` at build time plus the base-image digest bump (which
