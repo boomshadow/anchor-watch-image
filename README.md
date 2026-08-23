@@ -61,6 +61,10 @@ Publishing happens **only from a git tag**. Push a tag on `main` and the pipelin
 `linux/amd64,linux/arm64`, pushes `:<tag>` and `:latest`, and prints the published manifest digest.
 Nothing else in the pipeline pushes — merge requests and branches build for validation only.
 
+There is no `CHANGELOG.md`. The [releases page](https://gitlab.com/boomshadow/anchor-watch-image/-/releases)
+is the changelog, and a tag message carries a one-line summary and a link to its release rather than
+the change list itself.
+
 ## How this image stays current
 
 Dependencies are pinned and [Renovate](https://docs.renovatebot.com) proposes the updates — the image is
