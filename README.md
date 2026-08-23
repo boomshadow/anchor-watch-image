@@ -4,12 +4,21 @@ Pre-built Docker image for running [Anchored Development](https://anchored-dev.o
 
 ## What's in the image
 
-- `node:24.16.0-alpine3.23` base, digest-pinned
-- [Claude Code](https://claude.ai) CLI, version-pinned (the official musl build)
+- `alpine:3.23` base, digest-pinned, with the `node` binary copied from a digest-pinned
+  `node:24.18.0-alpine3.23` build stage
 - [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk),
   installed at `/opt/sdk` and symlinked to `/node_modules` so drift-detector scripts resolve it
   without a per-run `npm install`
+- [Claude Code](https://claude.ai) CLI on `PATH` as `claude` — a symlink to the official musl
+  binary the Agent SDK vendors, so the CLI and the binary drift detection actually runs are the
+  same file
 - `bash`, `git`, `curl`, `jq` (see [Dockerfile](Dockerfile))
+
+**No package manager.** `npm`, `npx`, `yarn` and `corepack` exist only in the build stage. They are
+never needed at runtime — consuming pipelines run `node …/ci-drift-detector.mjs`, and the Agent SDK
+spawns Claude Code directly. npm carries ~144 vendored dependencies of its own that nothing here can
+patch — they are not in `package-lock.json` — so keeping it in the build stage is what holds the
+runtime image's Critical/High count at zero.
 
 ## Usage
 
@@ -60,9 +69,9 @@ nothing except the manifest digest, which is precisely what breaks downstream pi
 
 | Component | Pin | Updated by |
 |---|---|---|
-| Base image | digest | Renovate |
+| Base images (runtime `alpine`, build `node`) | digest | Renovate |
 | npm dependencies | exact version + lockfile integrity hashes | Renovate |
-| Claude Code CLI | exact version | Renovate |
+| Claude Code CLI | via the Agent SDK's platform package — exact version + lockfile integrity hash | Renovate |
 | Build toolchain (dind, BuildKit) | digest | Renovate |
 | Scanner images (Syft, Grype) | digest | Renovate |
 | `apk` packages | **unpinned, deliberately** | base image digest bump |
@@ -74,6 +83,11 @@ against the current repository — while the weekly Grype scan is what tells us 
 
 Note the limit of that mechanism: the `apk` layer is cached, so it only re-runs when the base digest
 changes. `apk upgrade` improves the starting point; it does not make a stale pin self-healing.
+
+The two base images are coupled: the runtime `alpine` must stay on the same major.minor as the build
+stage's `node:…-alpineX.Y`, because the `node` binary is copied out of that stage and links against its
+musl and `libstdc++`. Renovate proposes the two digests independently, so when one moves to a new Alpine
+minor the other has to move with it.
 
 ## Security scanning
 

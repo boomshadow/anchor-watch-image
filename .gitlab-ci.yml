@@ -6,14 +6,15 @@
 #
 # Why it matters: consumers pin `image:<version>@sha256:<digest>`. An untagged
 # manifest on GitLab.com is garbage-collected ~24h after it stops being referenced,
-# so a moving `:latest` used to silently delete the digest every consumer was pinned
-# to. An immutable version tag keeps its manifest alive forever, so a pin can go
-# stale but can never break.
+# so a moving `:latest` silently deletes the digest every consumer is pinned to. An
+# immutable version tag keeps its manifest alive forever, so a pin can go stale but
+# can never break.
 #
-# Freshness comes from Renovate (base-image digest, npm deps, Claude CLI version),
-# not from rebuilding on a timer. A timed rebuild replayed cached layers and changed
-# nothing but the manifest digest -- which is exactly what broke consumers. The
-# weekly schedule now runs the security scans against the published image instead.
+# Freshness comes from Renovate (base-image digests, npm deps -- which is also how
+# Claude Code itself is versioned), not from rebuilding on a timer. A timed rebuild
+# of a fully-pinned image replays cached layers and changes nothing but the manifest
+# digest, which is precisely what breaks a downstream pin. The weekly schedule runs
+# the security scans against the published image instead.
 workflow:
   rules:
     # Release: a git tag is the only thing that publishes.
@@ -79,11 +80,11 @@ lint:dockerfile:
 ##############################
 # Base template for Docker jobs.
 #
-# Both the dind service and BuildKit are digest-pinned. They used to float, and that
-# is what silently changed the published manifest digest on 2026-07-21 even though
-# the image contents were byte-identical: same layers, same config, different
-# manifest serialization. An unpinned builder makes builds non-reproducible in a way
-# that is invisible until it breaks a downstream pin.
+# Both the dind service and BuildKit are digest-pinned. A floating builder silently
+# changes the published manifest digest even when the image contents are
+# byte-identical: same layers, same config, different manifest serialization. That
+# makes builds non-reproducible in a way that is invisible until it breaks a
+# downstream pin.
 .docker:base:
   stage: build
   image: docker:29.5.3-dind-alpine3.23@sha256:7d85d0eda291f1a7ab6df4a9d1802b5ad4cf9145a088bd11188c78dcb5c7392b
