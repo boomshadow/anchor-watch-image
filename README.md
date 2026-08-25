@@ -4,8 +4,9 @@ Pre-built Docker image for running [Anchored Development](https://anchored-dev.o
 
 ## What's in the image
 
-- `alpine:3.23` base, digest-pinned, with the `node` binary copied from a digest-pinned
-  `node:24.18.0-alpine3.23` build stage
+- Alpine base, digest-pinned, with the `node` binary copied from a digest-pinned
+  `node:<version>-alpine<X.Y>` build stage on the same Alpine release — the
+  [Dockerfile](Dockerfile) is the line of truth for which versions those are
 - [`@anthropic-ai/claude-agent-sdk`](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk),
   installed at `/opt/sdk` and symlinked to `/node_modules` so drift-detector scripts resolve it
   without a per-run `npm install`
@@ -26,15 +27,16 @@ Pin the version tag **and** the digest:
 
 ```yaml
 anchor-watch:
-  image: registry.gitlab.com/boomshadow/anchor-watch-image:2.0.0@sha256:<digest>
+  image: registry.gitlab.com/boomshadow-public/anchor-watch-image:<version>@sha256:<digest>
   script:
     - node .claude/agents/scripts/ci-drift-detector.mjs
 ```
 
-The digest is printed by the release pipeline, and is also visible via:
+The current version is whatever the [releases page](https://gitlab.com/boomshadow-public/anchor-watch-image/-/releases)
+lists at the top. The digest is printed by the release pipeline, and is also visible via:
 
 ```sh
-docker buildx imagetools inspect registry.gitlab.com/boomshadow/anchor-watch-image:2.0.0
+docker buildx imagetools inspect registry.gitlab.com/boomshadow-public/anchor-watch-image:<version>
 ```
 
 **Pin the tag, not just the digest.** A digest-only reference (`@sha256:…` with no tag) points at a
@@ -47,8 +49,8 @@ can go stale but can never break.
 
 ## Versioning
 
-[Semantic versioning](https://semver.org), without a `v` prefix — the git tag and the image tag are both
-`1.0.0`.
+[Semantic versioning](https://semver.org), without a `v` prefix — the git tag and the image tag are the
+same string.
 
 - **MAJOR** — breaking for consumers: a Node major, a removed tool, a changed `PATH`/entrypoint, or an
   SDK change that breaks drift-detector scripts
@@ -61,7 +63,7 @@ Publishing happens **only from a git tag**. Push a tag on `main` and the pipelin
 `linux/amd64,linux/arm64`, pushes `:<tag>` and `:latest`, and prints the published manifest digest.
 Nothing else in the pipeline pushes — merge requests and branches build for validation only.
 
-There is no `CHANGELOG.md`. The [releases page](https://gitlab.com/boomshadow/anchor-watch-image/-/releases)
+There is no `CHANGELOG.md`. The [releases page](https://gitlab.com/boomshadow-public/anchor-watch-image/-/releases)
 is the changelog, and a tag message carries a one-line summary and a link to its release rather than
 the change list itself.
 
@@ -90,8 +92,15 @@ changes. `apk upgrade` improves the starting point; it does not make a stale pin
 
 The two base images are coupled: the runtime `alpine` must stay on the same major.minor as the build
 stage's `node:…-alpineX.Y`, because the `node` binary is copied out of that stage and links against its
-musl and `libstdc++`. Renovate proposes the two digests independently, so when one moves to a new Alpine
-minor the other has to move with it.
+musl and `libstdc++`. A mismatch still builds and pushes — the failure surfaces later, when `node` starts
+inside a consumer's pipeline.
+
+Renovate does not see the coupling on its own. Docker versioning reads everything after the first hyphen
+in `node:<version>-alpine<X.Y>` as a compatibility tag, so node is only ever offered another build on the
+*same* Alpine release and cannot follow a minor bump, while the runtime `alpine` has no such constraint
+and moves freely. Renovate's config compensates by teaching node a versioning that sorts the Alpine minor
+and grouping the two into one merge request — and the `lint:base-lockstep` CI job fails the pipeline
+whenever the two `FROM` lines disagree, which is what makes the coupling enforced rather than remembered.
 
 ## Security scanning
 

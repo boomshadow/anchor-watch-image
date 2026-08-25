@@ -6,9 +6,14 @@ don't install it on every run. Claude Code itself is the official musl binary th
 vendors as a platform-specific optional dependency — it is what the SDK spawns, and it
 is symlinked onto `PATH` as `claude`.
 
-The build is two-stage: `npm ci` runs in a `node:24.18.0-alpine3.23` stage, and the
-runtime is bare `alpine:3.23` with the `node` binary copied in. npm is build-time only,
-so the runtime image ships no package manager.
+The build is two-stage: `npm ci` runs in a `node:<version>-alpine<X.Y>` stage, and the
+runtime is a bare `alpine` of the same release with the `node` binary copied in. npm is
+build-time only, so the runtime image ships no package manager. The Dockerfile is the
+line of truth for those versions — don't restate them here, or in the README.
+
+Those two bases MUST stay on the same Alpine release: the copied `node` binary links
+against the build stage's musl and `libstdc++`, and a mismatch fails inside a consumer's
+pipeline rather than in this build. `lint:base-lockstep` enforces it.
 
 This is a **public** repo, mirrored to GitHub, and the image is pulled by projects
 outside this namespace. Treat it as a reference implementation.
@@ -40,7 +45,7 @@ a release page can. So the tag carries a summary line and a link, and nothing el
 ```
 3.0.0 — no package manager in the runtime image
 
-Release notes: https://gitlab.com/boomshadow/anchor-watch-image/-/releases/3.0.0
+Release notes: https://gitlab.com/boomshadow-public/anchor-watch-image/-/releases/3.0.0
 ```
 
 The release URL is `/-/releases/<tag>`, so it is known before the release exists. That
@@ -51,7 +56,7 @@ is what lets the tag point at one not yet created.
 ```bash
 git tag -a <version> -m "<summary line>
 
-Release notes: https://gitlab.com/boomshadow/anchor-watch-image/-/releases/<version>"
+Release notes: https://gitlab.com/boomshadow-public/anchor-watch-image/-/releases/<version>"
 git push origin <version>
 # the tag pipeline builds and pushes the image — wait for it to go green
 glab release create <version> --notes-file <notes>

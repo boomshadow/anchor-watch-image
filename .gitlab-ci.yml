@@ -64,16 +64,61 @@ variables:
 ############################
 # Lint
 ############################
-lint:dockerfile:
+# One pinned image for both lint jobs. A second copy of this digest would be the
+# same class of problem lint:base-lockstep exists to catch -- two pins that have to
+# be remembered together.
+.lint:base:
   extends: .rules-validate
   stage: lint
   image: hadolint/hadolint:v2.14.0-alpine@sha256:7aba693c1442eb31c0b015c129697cb3b6cb7da589d85c7562f9deb435a6657c
+
+lint:dockerfile:
+  extends: .lint:base
   # DL3018 (pin apk versions) is ignored deliberately -- see the Dockerfile comment:
   # Alpine drops old package versions from the repository as it moves, so pinning
   # breaks builds on someone else's schedule. The base-image digest bump is the
   # refresh mechanism.
   script:
     - hadolint Dockerfile --ignore DL3018
+
+# The two base images must sit on the same Alpine release. Stage 2 copies the `node`
+# binary out of stage 1, and that binary resolves musl and libstdc++ from whatever
+# stage 2 ships -- so a mismatch builds and pushes cleanly here and fails at `node`
+# startup inside a consumer's pipeline instead.
+#
+# Nothing else catches it. hadolint does not know the two FROM lines are related,
+# and Renovate treats them as unrelated dependencies: `alpine` moves on a plain
+# minor bump while `node:<ver>-alpine<X.Y>` is locked to its own suffix by Docker
+# compatibility versioning, so the runtime can walk to a new Alpine minor on its
+# own. The Renovate config proposes them together; this job is what enforces it
+# regardless of what Renovate does or does not see.
+lint:base-lockstep:
+  extends: .lint:base
+  script:
+    - |
+      build_alpine=$(sed -n 's/^FROM node:[0-9][0-9.]*-alpine\([0-9][0-9.]*\)@sha256:.*/\1/p' Dockerfile)
+      runtime_alpine=$(sed -n 's/^FROM alpine:\([0-9][0-9.]*\)@sha256:.*/\1/p' Dockerfile)
+
+      if [ -z "$build_alpine" ] || [ -z "$runtime_alpine" ]; then
+        echo "ERROR: could not read an Alpine version from both FROM lines."
+        echo "  build stage (FROM node:<ver>-alpine<X.Y>@sha256:...): '${build_alpine:-not found}'"
+        echo "  runtime     (FROM alpine:<X.Y>@sha256:...):           '${runtime_alpine:-not found}'"
+        echo
+        echo "The FROM lines have been reshaped. Update this check -- do not delete it."
+        exit 1
+      fi
+
+      if [ "$build_alpine" != "$runtime_alpine" ]; then
+        echo "ERROR: the two base images are on different Alpine releases."
+        echo "  build stage: alpine$build_alpine"
+        echo "  runtime:     alpine$runtime_alpine"
+        echo
+        echo "Stage 2 copies the node binary out of stage 1, and it links against that"
+        echo "stage's musl and libstdc++. Both FROM lines move together or neither does."
+        exit 1
+      fi
+
+      echo "OK: build stage and runtime are both on Alpine $build_alpine."
 
 ##############################
 # Docker/Build
