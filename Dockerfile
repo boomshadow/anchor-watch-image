@@ -18,7 +18,7 @@
 # Stage 1: build. Exists to run `npm ci` and nothing else, so it installs no
 # packages -- everything the runtime needs is installed in stage 2.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:24.18.0-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436 AS build
+FROM node:24.18.0-alpine3.24@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS build
 
 WORKDIR /opt/sdk
 COPY package.json package-lock.json ./
@@ -35,8 +35,21 @@ RUN npm ci
 #
 # This base MUST stay on the same Alpine major.minor as the node image above --
 # the node binary is copied out of that image and links against its musl and
-# libstdc++. Renovate bumps the two digests independently, so when one moves to a
-# new Alpine minor the other has to move with it.
+# libstdc++. A mismatch is not caught by the build: the binary loads against
+# whichever libraries stage 2 happens to ship, so the failure surfaces in a
+# consumer's pipeline rather than here.
+#
+# Two mechanisms hold the pair together, because a comment cannot:
+#   * `lint:base-lockstep` in .gitlab-ci.yml compares the Alpine version in both
+#     FROM lines and fails the pipeline when they disagree. This is the backstop
+#     and it is not optional -- if the FROM lines are ever reshaped, update the
+#     check rather than deleting it.
+#   * Renovate proposes the two together. Docker versioning reads everything
+#     after the first hyphen in `node:<ver>-alpine<X.Y>` as a compatibility tag
+#     and will only ever offer another `-alpine<X.Y>` build, so node cannot
+#     follow an Alpine minor on its own. The Renovate config teaches node a
+#     regex versioning that sorts the Alpine minor, and groups it with this
+#     image -- see packageRules in boomshadow_private/personal/renovate.
 # ─────────────────────────────────────────────────────────────────────────────
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
