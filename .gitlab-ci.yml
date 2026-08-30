@@ -76,8 +76,8 @@ lint:dockerfile:
   extends: .lint:base
   # DL3018 (pin apk versions) is ignored deliberately -- see the Dockerfile comment:
   # Alpine drops old package versions from the repository as it moves, so pinning
-  # breaks builds on someone else's schedule. The base-image digest bump is the
-  # refresh mechanism.
+  # breaks builds on someone else's schedule. `--no-cache-filter runtime` on the
+  # build and push jobs is what refreshes the layer instead.
   script:
     - hadolint Dockerfile --ignore DL3018
 
@@ -147,6 +147,10 @@ lint:base-lockstep:
 # Validate the build on merge requests and branches. Deliberately does NOT push:
 # only a tag publishes. `--provenance=false` keeps the output a plain manifest list
 # rather than an attestation-bearing index.
+#
+# `--no-cache-filter runtime` for the same reason as the push job below: a
+# validation build that replays a stale `apk` layer is not validating what a
+# release would produce.
 docker:build:
   extends:
     - .docker:base
@@ -156,11 +160,21 @@ docker:build:
       docker buildx build
       --platform linux/amd64,linux/arm64
       --tag $CI_REGISTRY_IMAGE:test
+      --no-cache-filter runtime
       --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache-image
       --provenance=false
       -f Dockerfile .
 
 # Publish a release. Tag pipelines only.
+#
+# `--no-cache-filter runtime` is a supply-chain control, not an optimisation
+# opt-out. The runtime stage runs `apk upgrade`, and its cache key is the pinned
+# base digest plus the command string -- neither of which moves when Alpine fixes
+# a package in the repository rather than rebuilding the base image. Without this,
+# a release replays whatever `apk upgrade` resolved to at the previous release and
+# republishes known-vulnerable packages, which is exactly what happened to the
+# OpenSSL 3.5.7 -> 3.5.8 fix. The build stage still comes from cache: `npm ci` is
+# pinned by the lockfile, so replaying it is safe.
 docker:push:
   extends: .docker:base
   # Publishes the release image other repos digest-pin. A release is not a retry.
@@ -171,6 +185,7 @@ docker:push:
       --platform linux/amd64,linux/arm64
       --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
       --tag $CI_REGISTRY_IMAGE:latest
+      --no-cache-filter runtime
       --cache-to type=registry,ref=$CI_REGISTRY_IMAGE/cache-image,mode=max,image-manifest=true,oci-mediatypes=true,ignore-error=true
       --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache-image
       --provenance=false

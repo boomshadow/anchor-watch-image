@@ -9,12 +9,16 @@
 # Entries are listed PER CVE rather than by package type, so a new, fixable CVE in
 # the same package still fails the build instead of hiding behind a blanket rule.
 #
+# An entry is deleted, not renewed, once the finding stops matching -- a rule that
+# excepts nothing is indistinguishable from one that hides something.
+#
 # WHAT THIS IMAGE IS, for reachability purposes: a CI drift-detection runner. It
 # executes inside an ephemeral GitLab job container, accepts no inbound network
 # connections, is not internet-facing, and handles no untrusted input beyond the
 # repository already checked out by the runner. Its only outbound traffic is HTTPS
-# to the Anthropic API and to package/registry hosts, all trusted origins. No proxy,
-# no .netrc, no mTLS client config, and no libcurl-based application -- curl is only
+# to the Anthropic API and to package/registry hosts, all trusted origins. It runs
+# no server of any kind and exits when its one script finishes. No proxy, no
+# .netrc, no mTLS client config, and no libcurl-based application -- curl is only
 # ever invoked as a CLI. It also carries no package manager: npm, npx, yarn and
 # corepack live in the build stage only, so nothing under a package manager's own
 # vendored tree can ever appear in a finding here.
@@ -24,90 +28,8 @@
 
 ignore:
   # ─────────────────────────────────────────────────────────────────────────────
-  # curl 8.20.0-r0 (apk) -- no fixed Alpine package exists for any of these.
-  # Verified build configuration in this image (`curl -V`):
-  #   Protocols: dict file ftp ftps gopher gophers http https imap imaps ipfs ipns
-  #              mqtt mqtts pop3 pop3s rtsp smtp smtps telnet tftp ws wss
-  #   Features:  alt-svc AsynchDNS brotli HSTS HTTP2 HTTPS-proxy IDN IPv6 Largefile
-  #              libz PSL SSL threadsafe TLS-SRP UnixSockets zstd
-  # Note what is ABSENT: no HTTP3/QUIC, no scp/sftp, no GSASL.
-  # ─────────────────────────────────────────────────────────────────────────────
-
-  # -- Not compiled into this build at all. Strongest class of exception: the
-  #    vulnerable code is not present in the binary.
-  - vulnerability: CVE-2026-11352
-    reason: "curl QUIC UDP receive DoS via zero-length datagrams; this build has NO HTTP3/QUIC support (absent from curl -V Features) so the code path does not exist; no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-9545
-    reason: "curl HTTP/3 connection reuse against an impostor server; this build has NO HTTP3/QUIC support (absent from curl -V Features) so the code path does not exist; no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-12064
-    reason: "curl --proto-default sftp/scp scheme-inference bypass; this build supports NEITHER scp NOR sftp (absent from curl -V Protocols) so the code path does not exist; no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-9547
-    reason: "curl SCP/SFTP host-key callback silently accepting an untrusted server; this build supports NEITHER scp NOR sftp (absent from curl -V Protocols); no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-8925
-    reason: "curl SASL GSASL context double-free; this build is not linked against GSASL (absent from curl -V version line) and the image performs no mail-protocol auth; no fixed Alpine package [expires:2026-10-24]"
-
-  # -- libcurl C API only. This image never links libcurl; curl is invoked solely as
-  #    a command-line tool, so these entry points are unreachable by construction.
-  - vulnerability: CVE-2026-10536
-    reason: "libcurl use-after-free requiring CURLOPT_STREAM_DEPENDS + curl_easy_reset(); reachable only from a libcurl-linked application, and this image contains none (curl is used as a CLI only); no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-9080
-    reason: "libcurl use-after-free via curl_easy_pause() inside a CURLMOPT_SOCKETFUNCTION callback; reachable only from a libcurl-linked application using the multi interface, and this image contains none; no fixed Alpine package [expires:2026-10-24]"
-
-  # -- Credential/connection reuse across differing origins or configs. All require
-  #    handle reuse across multiple origins, or a proxy / .netrc / mTLS / STARTTLS
-  #    configuration. This image configures none of those and each CLI invocation is
-  #    a single transfer to a single trusted origin.
-  - vulnerability: CVE-2026-11856
-    reason: "libcurl reuses Digest auth across a changed HTTP origin on the same handle; no handle reuse across origins here (curl runs as a one-shot CLI to trusted hosts) and no Digest auth is configured; no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-9079
-    reason: "libcurl fails to clear proxy auth credentials on request; image configures no proxy at all (no CURLOPT_PROXY, no proxy env vars in the job image); no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-8927
-    reason: "libcurl leaks proxy auth state between transfers under env-var proxy configuration; image sets no proxy environment variables; no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-8926
-    reason: "curl .netrc password mismatch when a URL supplies a username without a password; image uses no .netrc (none exists in the image) and passes no user@host URLs; no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-11564
-    reason: "libcurl connection pool may keep trusting native CA store after the handle switches trust config; single-origin one-shot CLI transfers only, no pooled reuse across differing trust configs; no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-8932
-    reason: "libcurl reuses a pooled connection after mTLS-related options change; image configures no client certificates (no mTLS anywhere) so the mismatch condition cannot arise; no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-8286
-    reason: "libcurl reuses a live connection for a STARTTLS upgrade despite mismatched TLS config; image performs no STARTTLS (no smtp/imap/pop3 usage); no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-9546
-    reason: "libcurl fails to clear the Referer header when CURLOPT_REFERER is set to NULL; libcurl API only and the image never sets a Referer; information-disclosure to the same trusted origin at worst; no fixed Alpine package [expires:2026-10-24]"
-
-  # -- Require a malicious server on the other end of a transfer this image initiates.
-  #    Outbound traffic is limited to the Anthropic API and package/registry hosts.
-  - vulnerability: CVE-2026-8924
-    reason: "curl cookie-parsing allows a malicious HTTP server to set super-cookies bypassing the PSL check; image enables no cookie jar and contacts only trusted origins (Anthropic API, package registries); no fixed Alpine package [expires:2026-10-24]"
-  - vulnerability: CVE-2026-11586
-    reason: "curl WebSocket PING auto-response memory exhaustion from a malicious server; image never uses curl's ws/wss support; no fixed Alpine package [expires:2026-10-24]"
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # openssl 3.5.7-r0 (apk), shipped as libssl3 + libcrypto3.
-  #
-  # Unlike the curl block above, the vulnerable code IS compiled into the shipped
-  # library -- OSSL_QUIC_server_method, SSL_new_listener and SSL_accept_connection
-  # all resolve in /usr/lib/libssl.so.3 -- so this exception rests on the caller
-  # side instead: nothing in the image ever creates a QUIC listener. Verified
-  # against the published image:
-  #   * only TWO binaries link libssl3 -- curl and apk, both clients. git links
-  #     neither directly, and curl has no HTTP3/QUIC anyway (absent from
-  #     `curl -V` Features, same evidence the curl block above cites).
-  #   * node does NOT link system OpenSSL at all -- `ldd $(command -v node)` shows
-  #     no libssl/libcrypto. It carries its own bundled 3.5.7, and that build
-  #     reports EMPTY ngtcp2 and nghttp3 versions, so node's QUIC is absent too.
-  #
-  # A base-image bump is NOT the escape hatch here: OpenSSL rates this LOW and
-  # deliberately shipped no release for it (3.5.8 is pending), so Alpine has no
-  # fixed package on v3.23 OR edge -- both are still 3.5.7-r0. Grype matches it
-  # through nvd:cpe rather than Alpine's secdb, which is why the fix state reads
-  # `unknown`. Revisit once OpenSSL cuts 3.5.8 and Alpine packages it.
-  # ─────────────────────────────────────────────────────────────────────────────
-  - vulnerability: CVE-2026-14456
-    reason: "OpenSSL QUIC server queues unlimited pending connections from Initial packets, letting a remote peer exhaust listener memory (DoS); reachable only from an application that creates a QUIC listener via SSL_new_listener/OSSL_QUIC_server_method, and this image runs no server of any kind -- the only binaries linking libssl3 are curl (built without HTTP3/QUIC) and apk, both clients, while node does not link system OpenSSL at all; upstream rates it LOW and published no release, so no fixed Alpine package exists on v3.23 or edge and a base bump does not clear it [expires:2026-10-24]"
-
-  # ─────────────────────────────────────────────────────────────────────────────
   # node 24.18.0 binary -- the July 2026 security release. These DO have a fix
-  # (24.18.1, released 2026-07-28), but its image (node:24.18.1-alpine3.23, pushed
+  # (24.18.1, released 2026-07-28), but its image (node:24.18.1-alpine3.24, pushed
   # 2026-07-30) is short of the 45-day soak window until 2026-09-13. 24.18.0 is the
   # newest base that has soaked. Take 24.18.1+ at expiry and drop these three.
   # ─────────────────────────────────────────────────────────────────────────────

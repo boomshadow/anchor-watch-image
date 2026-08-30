@@ -90,11 +90,14 @@ has already seen it. The repair for a bad release is the next version.
   optionalDependency of the Agent SDK; omitting it builds an image that fails at spawn
   time rather than at build time.
 - **The one deliberate exception is `apk`.** Alpine removes old package versions from
-  its repository as it moves, so version-pinning them breaks builds unpredictably. The
-  refresh path is `apk upgrade` at build time plus the base-image digest bump (which
-  changes the layer cache key, so the apk layer rebuilds against the current
-  repository); the weekly Grype scan is the signal that the bump is overdue.
-  `hadolint` DL3018 is ignored for this reason — don't "fix" it.
+  its repository as it moves, so version-pinning them breaks builds unpredictably.
+  What refreshes them instead is `apk upgrade` at build time plus
+  `--no-cache-filter runtime` on the build and push jobs, which stops the layer being
+  replayed from the registry cache. The base-image digest is not enough on its own:
+  Alpine fixes packages in the repository without rebuilding the base image, so a
+  digest bump may never come. The weekly Grype scan against the published image is
+  the signal that a release is overdue. `hadolint` DL3018 is ignored for this reason
+  — don't "fix" it, and don't drop the `--no-cache-filter` to speed a build up.
 - **Alpine, not Debian, and this was measured.** On identical contents Debian slim
   carried 135 High/Critical findings against Alpine's 38. Don't switch back without
   re-measuring. `yq` was removed for the same reason: nothing consuming this image
