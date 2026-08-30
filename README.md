@@ -80,15 +80,18 @@ nothing except the manifest digest, which is precisely what breaks downstream pi
 | Claude Code CLI | via the Agent SDK's platform package — exact version + lockfile integrity hash | Renovate |
 | Build toolchain (dind, BuildKit) | digest | Renovate |
 | Scanner images (Syft, Grype) | digest | Renovate |
-| `apk` packages | **unpinned, deliberately** | base image digest bump |
+| `apk` packages | **unpinned, deliberately** | `apk upgrade` on every build, uncached |
 
 Alpine drops old package versions from its repository as it moves, so pinning them breaks builds on a
-schedule nobody controls. Instead, the build runs `apk upgrade` (which patches packages the base image
-already shipped) and the base-image digest bump changes the layer cache key, rebuilding that layer
-against the current repository — while the weekly Grype scan is what tells us when the bump is overdue.
+schedule nobody controls. Instead, the build runs `apk upgrade`, patching packages the base image
+already shipped, and the runtime stage is built with `--no-cache-filter runtime` so that layer is never
+replayed from the registry cache — every release resolves `apk` against the repository as it stands
+that day.
 
-Note the limit of that mechanism: the `apk` layer is cached, so it only re-runs when the base digest
-changes. `apk upgrade` improves the starting point; it does not make a stale pin self-healing.
+The base-image digest alone does not carry this. Alpine fixes packages in its repository without
+rebuilding the base image, so the digest — and with it the layer's cache key — can sit still while a
+CVE is fixed upstream. The weekly Grype scan against the published image is what reports that gap, and
+cutting a release is what closes it.
 
 The two base images are coupled: the runtime `alpine` must stay on the same major.minor as the build
 stage's `node:…-alpineX.Y`, because the `node` binary is copied out of that stage and links against its

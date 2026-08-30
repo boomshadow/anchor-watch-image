@@ -51,7 +51,7 @@ RUN npm ci
 #     regex versioning that sorts the Alpine minor, and groups it with this
 #     image -- see packageRules in boomshadow_private/personal/renovate.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
 
 # `apk upgrade` first: the base image is a point-in-time snapshot, so packages it
 # already contains can carry fixed CVEs that `apk add` alone would never touch.
@@ -59,9 +59,15 @@ FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec4
 #
 # Deliberately NOT version-pinned. Alpine drops old package versions from the
 # repository as it moves, so pinning here breaks the build on a schedule nobody
-# controls. The supply-chain control for this layer is the digest-pinned base above
-# plus the weekly Grype scan, which is what tells us when that base bump is overdue.
-# hadolint DL3018 is ignored in CI for this reason.
+# controls. hadolint DL3018 is ignored in CI for this reason.
+#
+# What keeps the layer honest is that a release never reuses it. `docker:push`
+# passes `--no-cache-filter runtime`, so this stage rebuilds against the current
+# Alpine repository on every tag -- which is also why the stage carries a name.
+# The digest-pinned base above is not enough on its own: Alpine fixes packages in
+# the repository without rebuilding the base image, so a CVE can be fixed upstream
+# while the base digest -- and with it this layer's cache key -- never moves. The
+# weekly Grype scan against the published image is what reports that state.
 #
 # bash is required by the SHELL directive below. libstdc++ is what the copied node
 # binary links against (`ldd node` resolves musl, libstdc++ and libgcc_s, the last
