@@ -47,6 +47,13 @@ can go stale but can never break.
 
 `:latest` exists for discovery. Don't reference it from CI.
 
+### Authentication
+
+The image runs Claude Code, which needs a single environment variable in the job:
+`CLAUDE_CODE_OAUTH_TOKEN`. It reuses an existing Anthropic subscription, and is generated with
+`claude setup-token`
+([docs](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token)).
+
 ## Versioning
 
 [Semantic versioning](https://semver.org), without a `v` prefix — the git tag and the image tag are the
