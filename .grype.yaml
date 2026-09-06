@@ -43,8 +43,35 @@ ignore:
   # ─────────────────────────────────────────────────────────────────────────────
   # Our npm tree, at /opt/sdk/node_modules. This is the only JavaScript in the
   # runtime image, and it IS ours to fix -- a package-lock refresh takes it -- so
-  # the only thing holding the fix back is the 45-day soak. Take the bump at expiry
-  # rather than renewing.
+  # the only thing holding the fix back is the 45-day soak.
+  #
+  # Every entry below is fast-uri, and they are one shape of bug wearing five hats:
+  # a URL-parsing disagreement that only matters to an application which normalises
+  # an untrusted URL and then makes a security decision on the result -- a host
+  # allowlist, an SSRF filter, a redirect check, an outbound fetch. This image's
+  # only consumer of fast-uri is ajv, which uses it to turn JSON-Schema $id/$ref
+  # into registry keys. Those keys are looked up, never fetched, so no host policy
+  # is ever decided from a fast-uri parse here. The chain is
+  # @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv -> fast-uri,
+  # both of the middle links as peer dependencies.
+  #
+  # 3.1.7 is the version that clears this block. 3.1.5 fixes only the first entry
+  # and is vulnerable to the other four; 3.1.6 fixes those four and is vulnerable to
+  # two later advisories. 3.1.7 published 2026-09-02 and soaks 2026-10-17. The
+  # GHSA-7p8r entry still carries the earlier date it was given when 3.1.5 looked
+  # like its fix, so it comes up for review before that target exists.
+  #
+  # fast-uri is under a sustained advisory campaign -- ten and counting, all of this
+  # same class. Expect more, and expect them to arrive without a version change on
+  # our side.
   # ─────────────────────────────────────────────────────────────────────────────
   - vulnerability: GHSA-7p8r-x3mc-p8w7
     reason: "fast-uri treats a backslash as a normal character where Node's WHATWG URL parser treats it as an authority introducer, so a host-policy check can disagree with the URL actually fetched; exploitation requires using fast-uri to enforce host-based policy (allowlist, SSRF filter, redirect validation) and this image's only consumer is ajv, which uses it to resolve JSON-Schema $id/$ref identifiers -- registry keys that are never fetched -- against the Agent SDK's own bundled schemas, not attacker input; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.5 published 2026-07-31 and soaks 2026-09-14 [expires:2026-09-24]"
+  - vulnerability: GHSA-5jgf-p345-68v8
+    reason: "fast-uri skips IDN-to-ASCII canonicalisation when resolving a scheme-relative reference (//host/) against a base carrying an explicit scheme, so a caller can vet one hostname and reach another; exploitation requires resolving an untrusted scheme-relative reference and then enforcing policy on the result, and ajv -- this image's only consumer -- resolves JSON-Schema $id/$ref into registry keys that are never fetched and never policy-checked; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.6 is itself superseded, so the real target is 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
+  - vulnerability: GHSA-fph4-wmhf-6fwf
+    reason: "fast-uri percent-decodes the hostname twice in normalize()/resolve(), so a nested encoding such as http://%256c%256f%2563%2561%256c%2568%256f%2573%2574/ collapses to http://localhost/ after an allowlist has already passed it; exploitation requires normalising an untrusted URI ahead of an SSRF check or an outbound request, and this image makes no outbound request from a fast-uri parse -- ajv resolves JSON-Schema $id/$ref into registry keys and fetches nothing; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.6 is itself superseded, so the real target is 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
+  - vulnerability: GHSA-f65p-4m7j-42xc
+    reason: "fast-uri silently truncates a malformed bracketed IPv6 literal instead of rejecting it, and leaves parse().error unset, so a caller checking for a parse failure routes to loopback or a private range believing the input was valid; exploitation requires normalising an untrusted URL before an outbound request or an access-control check, neither of which happens here -- ajv resolves JSON-Schema $id/$ref into registry keys, which are compared, not dialled; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.6 is itself superseded, so the real target is 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
+  - vulnerability: GHSA-jqff-g426-hqxp
+    reason: "fast-uri decodes percent-escapes in the scheme component with the legacy global unescape() and re-serialises the result raw, without re-escaping or validating it as a scheme, so an input like %2f%2fevil.example:/pwn can normalise into a different authority or carry CR LF onward into a response header; exploitation requires normalising an untrusted URL and then acting on the scheme or authority, and this image writes no HTTP response and decides no host policy from a fast-uri parse -- ajv resolves JSON-Schema $id/$ref into registry keys; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.6 is itself superseded, so the real target is 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
