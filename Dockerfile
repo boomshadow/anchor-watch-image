@@ -18,7 +18,7 @@
 # Stage 1: build. Exists to run `npm ci` and nothing else, so it installs no
 # packages -- everything the runtime needs is installed in stage 2.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:24.18.0-alpine3.24@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS build
+FROM node:24.18.1-alpine3.24@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3 AS build
 
 WORKDIR /opt/sdk
 COPY package.json package-lock.json ./
