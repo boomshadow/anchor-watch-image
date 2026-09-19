@@ -28,17 +28,21 @@
 
 ignore:
   # ─────────────────────────────────────────────────────────────────────────────
-  # node 24.18.0 binary -- the July 2026 security release. These DO have a fix
-  # (24.18.1, released 2026-07-28), but its image (node:24.18.1-alpine3.24, pushed
-  # 2026-07-30) is short of the 45-day soak window until 2026-09-13. 24.18.0 is the
-  # newest base that has soaked. Take 24.18.1+ at expiry and drop these three.
+  # Alpine base layer. Unlike the npm block below, this one has no fix to wait
+  # for: upstream carries the patch on `develop` (madler/zlib df84af2, plus three
+  # follow-ups) but has cut no release, and Alpine ships zlib-1.3.2-r0 unchanged
+  # from 3.21 through edge. Grype matches it through the nvd:cpe fallback rather
+  # than an Alpine advisory, because Alpine's tracker does not carry the CVE.
+  #
+  # The record's own metadata is unreliable -- OSV names the fix commit as the
+  # v1.3.2 tag itself, i.e. the last affected release, which Debian flagged too --
+  # but the bug is real: gz_vacate() and the unchecked memmove() are in v1.3.2 as
+  # shipped. The exception rests on reachability, not on a pending version, so it
+  # does not rot while Alpine has nothing to offer. Take the fixed apk when one
+  # lands and drop this.
   # ─────────────────────────────────────────────────────────────────────────────
-  - vulnerability: CVE-2026-58043
-    reason: "Node Permission Model path matching over-grants filesystem access; the permission model is opt-in and this image never runs node with --permission (entrypoint is a plain `node <script>.mjs`), so there is no allowlist to over-grant; fixed in 24.18.1 which soaks 2026-09-13 [expires:2026-09-24]"
-  - vulnerability: CVE-2026-56846
-    reason: "Node HTTP/2 retained header blocks bypass maxSessionMemory (DoS); this is a server-side memory limit and the image runs no server of any kind -- it is a one-shot CI job that exits; fixed in 24.18.1 which soaks 2026-09-13 [expires:2026-09-24]"
-  - vulnerability: CVE-2026-56848
-    reason: "Node HTTP/2 re-entrant send causes heap use-after-free in nghttp2; requires an active HTTP/2 session and the drift detector opens none -- it speaks HTTPS/1.1 to the Anthropic API and runs no server; fixed in 24.18.1 which soaks 2026-09-13 [expires:2026-09-24]"
+  - vulnerability: CVE-2026-85091
+    reason: "zlib gz_vacate() does an unchecked memmove() into the internal input buffer when a non-blocking gzwrite() stalls and leaves strm->next_in pointing at the caller's buffer, so a following gzprintf()/gzvprintf() writes past it; exploitation requires the gzFile API on a non-blocking descriptor, and nothing in this image uses it -- no ELF here imports a single gz* symbol, because curl, libcurl, git and its http helpers, libapk and apk all link libz for the raw z_stream API (inflate/deflate/crc32) only, while busybox, bash and jq do not link it at all; node, the only process that runs at runtime, links no libz either and bundles zlib 1.3.1, below the 1.3.1.2 floor of the affected range; no released fix exists in any Alpine branch [expires:2026-12-18]"
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Our npm tree, at /opt/sdk/node_modules. This is the only JavaScript in the
@@ -57,16 +61,15 @@ ignore:
   #
   # 3.1.7 is the version that clears this block. 3.1.5 fixes only the first entry
   # and is vulnerable to the other four; 3.1.6 fixes those four and is vulnerable to
-  # two later advisories. 3.1.7 published 2026-09-02 and soaks 2026-10-17. The
-  # GHSA-7p8r entry still carries the earlier date it was given when 3.1.5 looked
-  # like its fix, so it comes up for review before that target exists.
+  # two later advisories. 3.1.7 published 2026-09-02 and soaks 2026-10-17, which is
+  # the date every entry in this block is held to.
   #
   # fast-uri is under a sustained advisory campaign -- ten and counting, all of this
   # same class. Expect more, and expect them to arrive without a version change on
   # our side.
   # ─────────────────────────────────────────────────────────────────────────────
   - vulnerability: GHSA-7p8r-x3mc-p8w7
-    reason: "fast-uri treats a backslash as a normal character where Node's WHATWG URL parser treats it as an authority introducer, so a host-policy check can disagree with the URL actually fetched; exploitation requires using fast-uri to enforce host-based policy (allowlist, SSRF filter, redirect validation) and this image's only consumer is ajv, which uses it to resolve JSON-Schema $id/$ref identifiers -- registry keys that are never fetched -- against the Agent SDK's own bundled schemas, not attacker input; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.5 published 2026-07-31 and soaks 2026-09-14 [expires:2026-09-24]"
+    reason: "fast-uri treats a backslash as a normal character where Node's WHATWG URL parser treats it as an authority introducer, so a host-policy check can disagree with the URL actually fetched; exploitation requires using fast-uri to enforce host-based policy (allowlist, SSRF filter, redirect validation) and this image's only consumer is ajv, which uses it to resolve JSON-Schema $id/$ref identifiers -- registry keys that are never fetched -- against the Agent SDK's own bundled schemas, not attacker input; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; 3.1.5 fixes this advisory alone and is vulnerable to the four below, so the real target is 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
   - vulnerability: GHSA-5jgf-p345-68v8
     reason: "fast-uri skips IDN-to-ASCII canonicalisation when resolving a scheme-relative reference (//host/) against a base carrying an explicit scheme, so a caller can vet one hostname and reach another; exploitation requires resolving an untrusted scheme-relative reference and then enforcing policy on the result, and ajv -- this image's only consumer -- resolves JSON-Schema $id/$ref into registry keys that are never fetched and never policy-checked; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.6 is itself superseded, so the real target is 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
   - vulnerability: GHSA-fph4-wmhf-6fwf
