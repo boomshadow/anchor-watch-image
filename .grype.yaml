@@ -49,13 +49,16 @@ ignore:
   # runtime image, and it IS ours to fix -- a package-lock refresh takes it -- so
   # the only thing holding the fix back is the 45-day soak.
   #
-  # Every entry below is fast-uri, and they are one shape of bug wearing five hats:
-  # a URL-parsing disagreement that only matters to an application which normalises
-  # an untrusted URL and then makes a security decision on the result -- a host
-  # allowlist, an SSRF filter, a redirect check, an outbound fetch. This image's
-  # only consumer of fast-uri is ajv, which uses it to turn JSON-Schema $id/$ref
-  # into registry keys. Those keys are looked up, never fetched, so no host policy
-  # is ever decided from a fast-uri parse here. The chain is
+  # Every entry below is fast-uri, and five of them are one shape of bug wearing
+  # five hats: a URL-parsing disagreement that only matters to an application which
+  # normalises an untrusted URL and then makes a security decision on the result --
+  # a host allowlist, an SSRF filter, a redirect check, an outbound fetch. The sixth
+  # is the same failure from the other direction: serialize() trusting a port it was
+  # handed, which only matters to an application that builds a URI from untrusted
+  # parts. This image's only consumer of fast-uri is ajv, which uses it to turn
+  # JSON-Schema $id/$ref into registry keys, serializing only what it has just
+  # parsed. Those keys are looked up, never fetched, so no host policy is ever
+  # decided from a fast-uri parse here. The chain is
   # @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv -> fast-uri,
   # both of the middle links as peer dependencies.
   #
@@ -65,7 +68,7 @@ ignore:
   # the date every entry in this block is held to.
   #
   # fast-uri is under a sustained advisory campaign -- ten and counting, all of this
-  # same class. Expect more, and expect them to arrive without a version change on
+  # same family. Expect more, and expect them to arrive without a version change on
   # our side.
   # ─────────────────────────────────────────────────────────────────────────────
   - vulnerability: GHSA-7p8r-x3mc-p8w7
@@ -78,3 +81,5 @@ ignore:
     reason: "fast-uri silently truncates a malformed bracketed IPv6 literal instead of rejecting it, and leaves parse().error unset, so a caller checking for a parse failure routes to loopback or a private range believing the input was valid; exploitation requires normalising an untrusted URL before an outbound request or an access-control check, neither of which happens here -- ajv resolves JSON-Schema $id/$ref into registry keys, which are compared, not dialled; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.6 is itself superseded, so the real target is 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
   - vulnerability: GHSA-jqff-g426-hqxp
     reason: "fast-uri decodes percent-escapes in the scheme component with the legacy global unescape() and re-serialises the result raw, without re-escaping or validating it as a scheme, so an input like %2f%2fevil.example:/pwn can normalise into a different authority or carry CR LF onward into a response header; exploitation requires normalising an untrusted URL and then acting on the scheme or authority, and this image writes no HTTP response and decides no host policy from a fast-uri parse -- ajv resolves JSON-Schema $id/$ref into registry keys; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.6 is itself superseded, so the real target is 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
+  - vulnerability: GHSA-qw65-cvwx-89v3
+    reason: "fast-uri concatenates the port component verbatim when recomposing the authority, so a non-digit port such as @127.0.0.1:8124 demotes the intended host to userinfo and redirects the serialized URI; exploitation requires assigning untrusted data to the port of a component object passed to serialize()/normalize()/equal(), and ajv -- this image's only consumer -- serializes only components it has just produced with parse(), whose port is always digits, the case the advisory itself excludes; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fixed in 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
