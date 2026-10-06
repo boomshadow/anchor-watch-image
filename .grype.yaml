@@ -49,7 +49,7 @@ ignore:
   # runtime image, and it IS ours to fix -- a package-lock refresh takes it -- so
   # the only thing holding the fix back is the 45-day soak.
   #
-  # Every entry below is fast-uri, and five of them are one shape of bug wearing
+  # Six entries below are fast-uri, and five of them are one shape of bug wearing
   # five hats: a URL-parsing disagreement that only matters to an application which
   # normalises an untrusted URL and then makes a security decision on the result --
   # a host allowlist, an SSRF filter, a redirect check, an outbound fetch. The sixth
@@ -65,7 +65,7 @@ ignore:
   # 3.1.7 is the version that clears this block. 3.1.5 fixes only the first entry
   # and is vulnerable to the other four; 3.1.6 fixes those four and is vulnerable to
   # two later advisories. 3.1.7 published 2026-09-02 and soaks 2026-10-17, which is
-  # the date every entry in this block is held to.
+  # the date every fast-uri entry is held to.
   #
   # fast-uri is under a sustained advisory campaign -- ten and counting, all of this
   # same family. Expect more, and expect them to arrive without a version change on
@@ -83,3 +83,11 @@ ignore:
     reason: "fast-uri decodes percent-escapes in the scheme component with the legacy global unescape() and re-serialises the result raw, without re-escaping or validating it as a scheme, so an input like %2f%2fevil.example:/pwn can normalise into a different authority or carry CR LF onward into a response header; exploitation requires normalising an untrusted URL and then acting on the scheme or authority, and this image writes no HTTP response and decides no host policy from a fast-uri parse -- ajv resolves JSON-Schema $id/$ref into registry keys; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fix 3.1.6 is itself superseded, so the real target is 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
   - vulnerability: GHSA-qw65-cvwx-89v3
     reason: "fast-uri concatenates the port component verbatim when recomposing the authority, so a non-digit port such as @127.0.0.1:8124 demotes the intended host to userinfo and redirects the serialized URI; exploitation requires assigning untrusted data to the port of a component object passed to serialize()/normalize()/equal(), and ajv -- this image's only consumer -- serializes only components it has just produced with parse(), whose port is always digits, the case the advisory itself excludes; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> ajv; fixed in 3.1.7, published 2026-09-02 and soaking 2026-10-17 [expires:2026-10-24]"
+
+  # proxy-addr is express's, and express arrives the same way ajv does: a peer
+  # dependency of @modelcontextprotocol/sdk. The MCP SDK uses it only in its
+  # HTTP-server helpers (server/express.js and the auth router), which the Agent SDK
+  # never imports -- it loads server/mcp.js and types.js, neither of which reaches
+  # express. A lockfile refresh takes 2.0.8 within express's ^2.0.7 range.
+  - vulnerability: GHSA-jqcg-44mw-7w3h
+    reason: "proxy-addr compiles a short-prefix IPv4-mapped IPv6 trust subnet (e.g. ::ffff:10.0.0.0/8) so that it matches every IPv4 address, letting a client spoof req.ip via X-Forwarded-For; exploitation requires an Express server configured with such a trust-proxy subnet that relies on the client IP, and this image runs no HTTP server -- express is reachable only through @modelcontextprotocol/sdk's server/express.js and auth router, which the Agent SDK never imports (it loads server/mcp.js and types.js only); transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> express; fixed in 2.0.8, published 2026-09-15 and soaking 2026-10-30 [expires:2026-11-06]"
