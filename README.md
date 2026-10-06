@@ -49,10 +49,35 @@ can go stale but can never break.
 
 ### Authentication
 
-The image runs Claude Code, which needs a single environment variable in the job:
-`CLAUDE_CODE_OAUTH_TOKEN`. It reuses an existing Anthropic subscription, and is generated with
-`claude setup-token`
-([docs](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token)).
+The image runs Claude Code, which takes its credentials from the job's environment. Set the
+variables for one provider.
+
+#### Claude subscription
+
+Run `claude setup-token` locally
+([docs](https://code.claude.com/docs/en/authentication#generate-a-long-lived-token)). It signs in
+through the browser and prints a long-lived token tied to your Claude subscription. Store it as a
+**masked** CI/CD variable named `CLAUDE_CODE_OAUTH_TOKEN`.
+
+Don't mark it **protected**. GitLab exposes protected variables only to pipelines on protected
+branches and tags, and drift detection runs in merge request pipelines from feature branches — a
+protected token is missing exactly where it is needed.
+
+#### Amazon Bedrock
+
+| Variable | Value |
+|---|---|
+| `CLAUDE_CODE_USE_BEDROCK` | `1` |
+| `AWS_REGION` | The Bedrock region to call |
+| `ANTHROPIC_MODEL` | A Bedrock inference profile ID or ARN for the model you have enabled |
+
+Choose the model deliberately. It decides both the quality of drift detection and what each run
+costs.
+
+Claude Code resolves AWS credentials through the standard AWS SDK credential chain, so use whatever
+your runners already provide: GitLab OIDC, EKS Pod Identity or IRSA on Kubernetes runners, or static
+keys. The IAM permissions it needs are listed in
+[Claude Code on Amazon Bedrock](https://code.claude.com/docs/en/amazon-bedrock#iam-configuration).
 
 ## Versioning
 
