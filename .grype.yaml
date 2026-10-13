@@ -91,3 +91,10 @@ ignore:
   # express. A lockfile refresh takes 2.0.8 within express's ^2.0.7 range.
   - vulnerability: GHSA-jqcg-44mw-7w3h
     reason: "proxy-addr compiles a short-prefix IPv4-mapped IPv6 trust subnet (e.g. ::ffff:10.0.0.0/8) so that it matches every IPv4 address, letting a client spoof req.ip via X-Forwarded-For; exploitation requires an Express server configured with such a trust-proxy subnet that relies on the client IP, and this image runs no HTTP server -- express is reachable only through @modelcontextprotocol/sdk's server/express.js and auth router, which the Agent SDK never imports (it loads server/mcp.js and types.js only); transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> express; fixed in 2.0.8, published 2026-09-15 and soaking 2026-10-30 [expires:2026-11-06]"
+
+  # The MCP SDK itself, a peer dependency of the Agent SDK. The advisory is in its
+  # OAuth client, which the Agent SDK never imports -- the same server/mcp.js and
+  # types.js import set the proxy-addr entry rests on. A lockfile refresh takes
+  # 1.31.0 within the Agent SDK's ^1.29.0 peer range.
+  - vulnerability: GHSA-6qxp-vccf-f47h
+    reason: "@modelcontextprotocol/sdk's OAuth client lets an MCP server name the authorization server that receives the client's stored refresh_token and client_secret; exploitation requires the SDK's HTTP OAuth client (an authProvider on a transport, withOAuth(), or direct auth()/fetchToken() calls) connecting to an untrusted MCP server, and the advisory excludes servers built with the SDK and stdio clients -- the Agent SDK imports only server/mcp.js and types.js and references none of those entry points, so the OAuth client is never loaded; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk; fixed in 1.31.0, published 2026-09-28 and soaking 2026-11-12 [expires:2026-11-19]"
