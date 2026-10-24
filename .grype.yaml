@@ -65,6 +65,11 @@ ignore:
   - vulnerability: GHSA-jqcg-44mw-7w3h
     reason: "proxy-addr compiles a short-prefix IPv4-mapped IPv6 trust subnet (e.g. ::ffff:10.0.0.0/8) so that it matches every IPv4 address, letting a client spoof req.ip via X-Forwarded-For; exploitation requires an Express server configured with such a trust-proxy subnet that relies on the client IP, and this image runs no HTTP server -- express is reachable only through @modelcontextprotocol/sdk's server/express.js and auth router, which the Agent SDK never imports (it loads server/mcp.js and types.js only); transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> express; fixed in 2.0.8, published 2026-09-15 and soaking 2026-09-29 [expires:2026-11-06]"
 
+  # body-parser is express's too, reached the same way, so it rests on the same
+  # import set. A lockfile refresh takes 2.4.0 within express's ^2.2.1 range.
+  - vulnerability: GHSA-27r3-jxmh-p828
+    reason: "body-parser leaves the decompression stream for a Content-Encoding request body piped with no error listener, so trailing bytes after one valid compressed frame raise an uncaught exception that terminates the process; exploitation requires an HTTP server parsing request bodies from untrusted clients, and this image runs no HTTP server -- express is reachable only through @modelcontextprotocol/sdk's server/express.js and auth router, which the Agent SDK never imports (it loads server/mcp.js and types.js only); transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk -> express -> body-parser; fixed in 2.4.0, published 2026-10-22 and soaking 2026-11-05 [expires:2026-12-08]"
+
   # The MCP SDK itself, a peer dependency of the Agent SDK. Each advisory sits in a
   # part of it the Agent SDK never reaches: the OAuth client, which it never imports
   # -- the same server/mcp.js and types.js import set the proxy-addr entry rests on
@@ -77,3 +82,10 @@ ignore:
     reason: "@modelcontextprotocol/sdk's experimental tasks feature does not tie a task to the session that created it, so clients sharing one InMemoryTaskStore can list, read and cancel each other's tasks; exploitation requires an HTTP MCP server constructed with a taskStore, and this image runs no HTTP server -- the Agent SDK's in-process MCP servers are built without a taskStore (its bundle never constructs an InMemoryTaskStore or passes one) and are reachable only over the SDK's own in-process transport; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk; fixed in 1.32.0, published 2026-10-02 and soaking 2026-10-16 [expires:2026-11-23]"
   - vulnerability: GHSA-46jr-4wx8-v453
     reason: "@modelcontextprotocol/sdk puts no bound on the array elements and object keys it validates in one request, so a single HTTP request inside the 4 MiB body limit can exhaust server heap; exploitation requires untrusted clients reaching an MCP server over HTTP, which the advisory itself scopes (stdio-only servers are unaffected), and this image accepts no inbound connections -- the Agent SDK's MCP servers are in-process, fed only by the Claude Code subprocess it spawns, and it carries no HTTP server transport; transitive via @anthropic-ai/claude-agent-sdk -> @modelcontextprotocol/sdk; fixed in 1.32.0, published 2026-10-02 and soaking 2026-10-16 [expires:2026-11-23]"
+
+  # zod, unlike the entries above, is code that runs: the Agent SDK and the MCP SDK
+  # validate messages with it. What keeps it out of reach is where those messages
+  # come from. Because the code does run, the expiry sits close behind the fix's
+  # soak date; a lockfile refresh takes 4.6.6 within every dependent's ^4 range.
+  - vulnerability: GHSA-mrhx-c7xc-m3w5
+    reason: "zod's $ZodArray accumulates a validation issue for every failing element with no cap, so a very large array checked against a schema with no length constraint can exhaust heap; exploitation requires an attacker to submit that array, and the only data zod validates here is the JSON-RPC and tool-call traffic between the Agent SDK and the Claude Code subprocess it spawns -- no network input reaches it, and the worst case is an out-of-memory exit of one ephemeral CI job; peer dependency of @anthropic-ai/claude-agent-sdk and @modelcontextprotocol/sdk; fixed in 4.6.6, published 2026-10-11 and soaking 2026-10-25 [expires:2026-11-08]"
