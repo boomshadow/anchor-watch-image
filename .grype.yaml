@@ -44,6 +44,13 @@ ignore:
   - vulnerability: CVE-2026-85091
     reason: "zlib gz_vacate() does an unchecked memmove() into the internal input buffer when a non-blocking gzwrite() stalls and leaves strm->next_in pointing at the caller's buffer, so a following gzprintf()/gzvprintf() writes past it; exploitation requires the gzFile API on a non-blocking descriptor, and nothing in this image uses it -- no ELF here imports a single gz* symbol, because curl, libcurl, git and its http helpers, libapk and apk all link libz for the raw z_stream API (inflate/deflate/crc32) only, while busybox, bash and jq do not link it at all; node, the only process that runs at runtime, links no libz either and bundles zlib 1.3.1, below the 1.3.1.2 floor of the affected range; no released fix exists in any Alpine branch [expires:2026-12-18]"
 
+  # curl, unlike zlib, has a fix: 8.23.0, which Alpine carries in edge but has not
+  # yet taken into 3.24. Nothing here pins curl -- `apk upgrade` on the next
+  # no-cache rebuild picks up the fixed package as soon as 3.24 ships it, and this
+  # entry is dropped in the same change. Grype matches it through nvd:cpe.
+  - vulnerability: CVE-2026-92392
+    reason: "curl mishandles an HTTP/2 RST_STREAM (HTTP_1_1_REQUIRED or REFUSED_STREAM) received during an upload and frees the transfer's Curl_easy while it is still in use; exploitation requires the server at the other end of an HTTP/2 upload to be hostile, and curl's own analysis puts code execution behind parallel transfers, a known build and allocator, and precise heap timing; curl here is invoked only as a CLI by the consuming job's own scripts, against the trusted HTTPS origins this image talks to (the Anthropic API, the GitLab API, package registries), and nothing in the image runs parallel transfers on its own; fixed in curl 8.23.0, released 2026-10-14 and present in Alpine edge as 8.23.0-r0, not yet in the 3.24 branch this image builds from [expires:2026-11-23]"
+
   # ─────────────────────────────────────────────────────────────────────────────
   # Our npm tree, at /opt/sdk/node_modules. This is the only JavaScript in the
   # runtime image, and it IS ours to fix -- a package-lock refresh takes it -- so
