@@ -18,7 +18,7 @@
 # Stage 1: build. Exists to run `npm ci` and nothing else, so it installs no
 # packages -- everything the runtime needs is installed in stage 2.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:24.18.1-alpine3.24@sha256:f70403e87646dc51b45295f4b8b70cdad0b63d2297c4c9899119b03f7af7a6b3 AS build
+FROM node:24.22.1-alpine3.24@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53 AS build
 
 WORKDIR /opt/sdk
 COPY package.json package-lock.json ./
@@ -51,7 +51,7 @@ RUN npm ci
 #     regex versioning that sorts the Alpine minor, and groups it with this
 #     image -- see packageRules in boomshadow_private/personal/renovate.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b AS runtime
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS runtime
 
 # `apk upgrade` first: the base image is a point-in-time snapshot, so packages it
 # already contains can carry fixed CVEs that `apk add` alone would never touch.
