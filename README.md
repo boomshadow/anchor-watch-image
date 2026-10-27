@@ -13,7 +13,11 @@ Pre-built Docker image for running [Anchored Development](https://anchored-dev.o
 - [Claude Code](https://claude.ai) CLI on `PATH` as `claude` — a symlink to the official musl
   binary the Agent SDK vendors, so the CLI and the binary drift detection actually runs are the
   same file
-- `bash`, `git`, `curl`, `jq` (see [Dockerfile](Dockerfile))
+- `git`, which drift detection uses to read the commits under review, and `bash` as the image's
+  shell
+
+Beyond these and Alpine's base `busybox`, nothing is installed for consuming jobs to call. The
+[Dockerfile](Dockerfile) is the line of truth for the exact contents.
 
 **No package manager.** `npm`, `npx`, `yarn` and `corepack` exist only in the build stage. They are
 never needed at runtime — consuming pipelines run `node …/ci-drift-detector.mjs`, and the Agent SDK
