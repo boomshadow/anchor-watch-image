@@ -80,7 +80,7 @@ FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c03
 # non-root additionally requires FF_DISABLE_UMASK_FOR_DOCKER_EXECUTOR in every
 # consuming pipeline.
 RUN apk upgrade --no-cache \
-    && apk add --no-cache bash git curl jq libstdc++ \
+    && apk add --no-cache bash git libstdc++ \
     && addgroup -g 1000 node \
     && adduser -u 1000 -G node -s /bin/sh -D node
 
