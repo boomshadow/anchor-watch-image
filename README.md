@@ -1,6 +1,7 @@
 # anchor-watch-image
 
-Pre-built Docker image for running [Anchored Development](https://anchored-dev.org) drift detection in CI pipelines.
+Pre-built Docker image for running [Anchored Development](https://anchored-dev.org) drift detection in CI pipelines,
+and [pre-commit hooks](#pre-commit-hooks) for the same checks before a push.
 
 ## What's in the image
 
@@ -83,6 +84,28 @@ your runners already provide: GitLab OIDC, EKS Pod Identity or IRSA on Kubernete
 keys. The IAM permissions it needs are listed in
 [Claude Code on Amazon Bedrock](https://code.claude.com/docs/en/amazon-bedrock#iam-configuration).
 
+## Pre-commit hooks
+
+The repository is also a [pre-commit](https://pre-commit.com) hook source, for the checks a developer
+wants before pushing and for platforms the GitLab job does not cover:
+
+- `gen-index-check` / `gen-index`: spec and ADR index freshness, Python standard library only
+- `drift-check`: a local pre-push drift check through `claude -p`, with a read-only tool set
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: https://github.com/boomshadow/anchor-watch-image
+    rev: <version>
+    hooks:
+      - id: gen-index-check
+      - id: drift-check
+```
+
+The image does not contain them, and a consumer of only the image is unaffected by them.
+[tools/README.md](tools/README.md) covers configuration, exit codes, and what the drift check refuses
+to do.
+
 ## Versioning
 
 [Semantic versioning](https://semver.org), without a `v` prefix — the git tag and the image tag are the
@@ -91,6 +114,12 @@ same string.
 - **MAJOR** — breaking for consumers: a Node major, a removed tool, a changed `PATH`/entrypoint, or an
   SDK change that breaks drift-detector scripts
 - **MINOR** — a tool added, or an SDK minor
+- For the pre-commit hooks: a removed or renamed hook id, or a changed exit code meaning, is
+  **MAJOR**; a new hook or option is **MINOR**; a fix is **PATCH**
+
+A release covers both the image and the hooks, so a hooks-only release still publishes an image
+under the new tag. Its contents match the previous release apart from the `apk` refresh every
+release performs.
 - **PATCH** — base image digest refresh, SDK patch, apt security refresh
 
 ## Releasing
