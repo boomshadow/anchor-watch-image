@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""Generate docs/specs/INDEX.md and docs/decisions/INDEX.md from frontmatter.
+
+Usage (run from anywhere inside the repository):
+  gen-index           rewrite both INDEX.md files
+  gen-index --check   exit 1 if either INDEX.md is stale, write nothing
+  gen-index --help    show this text
+
+The check ignores the AUTO-GENERATED header comment, so it agrees with indexes
+written by the spec and adr skills' own generate_index.py scripts.
+
+Exit codes: 0 ok / fresh, 1 stale (--check only), 2 invalid frontmatter, usage,
+or any other failure.
+Stdlib only, so it runs anywhere python3 does with nothing to install. Frontmatter
+must stay simple: one `key: value` per line, tags as an inline `[a, b]` list.
+"""
+import pathlib
+import re
+import subprocess
+import sys
+
+SETS = [
+    ("docs/specs", "SPEC", "Specifications", ()),
+    ("docs/decisions", "ADR", "Architecture Decision Records", ("Context", "Decision", "Consequences")),
+]
+REQUIRED = ("title", "description", "status", "tags")
+STATUSES = {"accepted"}  # a draft signals incomplete work and is rejected
+
+
+class FrontmatterError(Exception):
+    pass
+
+
+def repo_root():
+    out = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True
+    )
+    if out.returncode != 0:
+        raise FrontmatterError("not inside a git repository")
+    return pathlib.Path(out.stdout.strip())
+
+
+YAML_SPECIAL = re.compile(
+    r"^(true|false|yes|no|y|n|on|off|null|~|[-+]?(\.inf|\.nan)|0x[0-9a-f_]+|0o?[0-7_]+|[-+]?[0-9][0-9_]*(\.[0-9_]*)?([eE][-+]?[0-9]+)?|[0-9]+(:[0-5]?[0-9])+(\.[0-9]*)?)$", re.IGNORECASE
+)
+
+
+def unquote(value, where):
+    """Decode a scalar, rejecting any YAML construct this tool does not read exactly."""
+    value = value.strip()
+    if value and value[0] in "\"'":
+        if len(value) < 2 or value[-1] != value[0]:
+            raise FrontmatterError(f"{where}: unbalanced quotes")
+        inner = value[1:-1]
+        if value[0] == "'":
+            if "'" in inner:
+                raise FrontmatterError(f"{where}: escaped single quote is unsupported; use double quotes")
+            return inner
+        out, i = [], 0
+        while i < len(inner):
+            c = inner[i]
+            if c == '"':
+                raise FrontmatterError(f"{where}: unescaped double quote")
+            if c == "\\":
+                if inner[i + 1:i + 2] not in ('"', "\\"):
+                    raise FrontmatterError(f"{where}: only \\\" and \\\\ escapes are supported")
+                i += 1
+            out.append(inner[i])
+            i += 1
+        return "".join(out)
+    if re.search(r"[ \t]#", value):
+        raise FrontmatterError(f"{where}: trailing comment is unsupported; quote the value")
+    if (
+        (value and value[0] in "[]{}&*!|>%@`")
+        or re.match(r"[-?:](\s|$)", value)
+        or ": " in value
+        or ":\t" in value
+        or value.endswith(":")
+        or "\t" in value
+    ):
+        raise FrontmatterError(f"{where}: YAML would not read this as a plain string; double-quote it")
+    if YAML_SPECIAL.match(value):
+        raise FrontmatterError(f"{where}: YAML would read this as a non-string; quote it")
+    return value
+
+
+def quote_closed(raw):
+    """True when a double-quoted scalar has its closing quote."""
+    return len(raw) >= 2 and raw.endswith('"') and not re.search(r'(?<!\\)(\\\\)*\\"$', raw)
+
+
+def parse_frontmatter(path):
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    if not text.startswith("---\n"):
+        raise FrontmatterError(f"{path}: missing frontmatter opening '---'")
+    if not text.endswith("\n"):
+        text += "\n"
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        raise FrontmatterError(f"{path}: missing frontmatter closing '---'")
+    meta = {}
+    lines = text[4:end].splitlines()
+    pending = None
+    for lineno, line in enumerate(lines, start=2):
+        if pending is not None:
+            # A double-quoted value wrapped over several lines folds into one.
+            key, raw, start = pending
+            raw += " " + line.strip()
+            if quote_closed(raw):
+                meta[key] = unquote(raw, f"{path}:{start}")
+                pending = None
+            else:
+                pending = (key, raw, start)
+            continue
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$", line)
+        if not m:
+            raise FrontmatterError(f"{path}:{lineno}: unparseable frontmatter line")
+        key, raw = m.group(1), m.group(2).strip()
+        if raw.startswith('"') and key != "tags" and not quote_closed(raw):
+            pending = (key, raw, lineno)
+            continue
+        if key == "tags":
+            if not (raw.startswith("[") and raw.endswith("]")):
+                raise FrontmatterError(f"{path}:{lineno}: tags must be an inline [list]")
+            meta[key] = [unquote(t, f"{path}:{lineno}") for t in raw[1:-1].split(",") if t.strip()]
+        else:
+            meta[key] = unquote(raw, f"{path}:{lineno}")
+    if pending is not None:
+        raise FrontmatterError(f"{path}:{pending[2]}: unbalanced quotes")
+    missing = [k for k in REQUIRED if not meta.get(k)]
+    if missing:
+        raise FrontmatterError(f"{path}: missing frontmatter field(s): {', '.join(missing)}")
+    if meta["status"] not in STATUSES:
+        raise FrontmatterError(
+            f"{path}: status '{meta['status']}' not one of {sorted(STATUSES)}"
+        )
+    bad = [t for t in meta["tags"] if t != t.lower()]
+    if bad:
+        raise FrontmatterError(f"{path}: tags must be lowercase: {', '.join(bad)}")
+    meta["_body"] = text[end + 5:]
+    return meta
+
+
+def cell(value):
+    return " ".join(str(value).split()).replace("|", "\\|")
+
+
+def render(root, directory, prefix, heading, sections):
+    pattern = re.compile(rf"^{prefix}-(\d{{3}})-[\w-]+\.md$")
+    rows = []
+    seen = {}
+    files = sorted((root / directory).glob(f"{prefix}-*.md"))
+    for path in files:
+        m = pattern.match(path.name)
+        if not m:
+            raise FrontmatterError(f"{path}: name does not match {prefix}-NNN-slug.md")
+        number = f"{prefix}-{m.group(1)}"
+        if number in seen:
+            raise FrontmatterError(f"{path}: number {number} reused (also {seen[number]})")
+        seen[number] = path.name
+        meta = parse_frontmatter(path)
+        body = meta["_body"]
+        for section in sections:
+            if not re.search(rf"^#{{1,6}}\s+{section}\b", body, re.MULTILINE):
+                raise FrontmatterError(f"{path}: missing required section: {section}")
+        rows.append(
+            "| [{n}]({f}) | {t} | {d} | {s} | {g} |".format(
+                n=number,
+                f=path.name,
+                t=cell(meta["title"]),
+                d=cell(meta["description"]),
+                s=cell(meta["status"]),
+                g=cell(", ".join(meta["tags"])),
+            )
+        )
+    lines = [
+        "<!-- AUTO-GENERATED by tools/gen-index — do not edit manually -->",
+        "",
+        f"# {heading}",
+        "",
+        "| Number | Title | Description | Status | Tags |",
+        "|--------|-------|-------------|--------|------|",
+        *rows,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def body_of(index_text):
+    """An index without its AUTO-GENERATED header comment."""
+    return re.sub(r"\A<!-- AUTO-GENERATED[^\n]*-->\n", "", index_text)
+
+
+def main(argv):
+    if argv in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        return 0
+    if argv not in ([], ["--check"]):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    check = argv == ["--check"]
+    try:
+        root = repo_root()
+        outputs = [(root / d / "INDEX.md", render(root, d, p, h, s)) for d, p, h, s in SETS]
+        stale = []
+        for index, content in outputs:
+            current = index.read_text(encoding="utf-8") if index.exists() else None
+            if current == content or (current is not None and body_of(current) == body_of(content)):
+                continue
+            rel = index.relative_to(root)
+            if check:
+                stale.append(str(rel))
+            else:
+                index.parent.mkdir(parents=True, exist_ok=True)
+                index.write_text(content, encoding="utf-8")
+                print(f"gen-index: wrote {rel}")
+    except (FrontmatterError, OSError, UnicodeDecodeError) as exc:
+        print(f"gen-index: {exc}", file=sys.stderr)
+        return 2
+    if stale:
+        for rel in stale:
+            print(f"gen-index: {rel} is stale; regenerate it and commit the result", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

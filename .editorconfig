@@ -21,3 +21,8 @@ indent_style = space
 [*.{md,sh,bash}]
 indent_size = 4
 indent_style = space
+
+# The pre-commit tools have no extension.
+[tools/{drift-check,gen-index}]
+indent_size = 4
+indent_style = space
