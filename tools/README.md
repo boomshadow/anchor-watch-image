@@ -18,7 +18,12 @@ repos:
     hooks:
       - id: gen-index-check
       - id: drift-check
+      - id: gen-index        # needed for `pre-commit run --hook-stage manual gen-index`
+        stages: [manual]
 ```
+
+pre-commit runs only the hooks a repository lists, so `gen-index` must be listed (with its `manual`
+stage) for the regenerate command to work; leaving it out fails with "No hook with id gen-index".
 
 ```sh
 pre-commit install --hook-type pre-push
@@ -40,11 +45,42 @@ GitHub Actions can run the index check, which needs no model and no secret:
 The drift check stays where a project already runs drift detection. On GitLab that is the
 `anchor-watch` job in this image.
 
+### Repositories with `core.hooksPath`
+
+`pre-commit install` refuses to run when `core.hooksPath` is set (for example, by a repository's own
+commit guard). Call the hooks from a `pre-push` script in that directory instead, once per pushed
+ref, so each check sees the ref being pushed:
+
+```sh
+#!/bin/sh
+# <hooksPath>/pre-push: run the Anchored Development hooks for every pushed ref.
+set -eu
+command -v pre-commit >/dev/null 2>&1 || {
+    echo "pre-push: pre-commit is not installed; push with --no-verify to skip once." >&2; exit 1; }
+zero=0000000000000000000000000000000000000000
+while read -r _lref lsha _rref rsha; do
+    [ "$lsha" = "$zero" ] && continue                      # deleting a ref
+    from=$rsha; git cat-file -e "$rsha^{commit}" 2>/dev/null || from=$lsha
+    PRE_COMMIT_REMOTE_NAME=$1 pre-commit run --hook-stage pre-push --from-ref "$from" --to-ref "$lsha" </dev/null
+done
+```
+
+Both checks read the commit named by `--to-ref` from git objects, so the working tree does not
+matter. With an older release whose `gen-index-check` reads the working tree, the script must also
+refuse a push unless every pushed ref is `HEAD` and `git diff --quiet HEAD` holds; otherwise a fix
+that is staged but not committed, or the checked-out branch, is what gets checked.
+
 ## gen-index
 
 Generates both `INDEX.md` files from frontmatter, in the same table format as the spec and adr
 skills' generators. An empty directory yields a header-only index, so a repository can start with no
 specs or ADRs. `--check` writes nothing and exits 1 when either index is stale.
+
+`--check` reads the commit pre-commit reports as pushed (`PRE_COMMIT_TO_REF`), or the one named by
+`--check --ref <ref>`, from git objects. A pre-push run therefore judges exactly what is pushed: an
+index fixed in the working tree or the index but not committed still fails, and pushing a branch other
+than the checked-out one checks that branch. With no ref it reads the working tree, and rewriting
+always writes the working tree.
 
 It uses only the Python standard library, so a hook or CI job installs nothing. In exchange,
 frontmatter must stay simple: one `key: value` per line and tags as an inline list. Constructs it
@@ -110,7 +146,8 @@ hook is advisory, and catches honest drift rather than enforcing policy.
 - Sizes are counted in bytes, where CI counts characters, so a diff heavy in non-ASCII text can be
   refused locally that CI accepts.
 - Submodule content is absent from the export. Only the first pushed ref is checked when a push
-  carries several. There is no timeout around the model call.
+  carries several, because pre-commit's own pre-push hook reports only that one (the
+  `core.hooksPath` script above checks every ref). There is no timeout around the model call.
 
 ## Design choices
 

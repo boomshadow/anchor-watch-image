@@ -100,6 +100,8 @@ repos:
     hooks:
       - id: gen-index-check
       - id: drift-check
+      - id: gen-index        # needed for `pre-commit run --hook-stage manual gen-index`
+        stages: [manual]
 ```
 
 The image does not contain them, and a consumer of only the image is unaffected by them.

@@ -94,5 +94,27 @@ expect "INDEX.md is a directory"      2 "$tool" --check
 fixture; printf 'no frontmatter\n' > "$repo/docs/specs/SPEC-001-thing.md"
 expect "missing frontmatter"          2 "$tool"
 
+# --check reads the pushed commit (PRE_COMMIT_TO_REF or --ref), not the working tree.
+commit() { git -C "$repo" add -A && git -C "$repo" -c user.name=t -c user.email=t@example.invalid commit -qm "$1"; }
+fixture; spec SPEC-001-thing.md accepted; (cd "$repo" && "$tool" >/dev/null); commit fresh
+sed -i 's/^title: .*/title: "Renamed"/' "$repo/docs/specs/SPEC-001-thing.md"; commit "stale index"
+(cd "$repo" && "$tool" >/dev/null); git -C "$repo" add -A
+expect "staged fix: working tree passes"        0 "$tool" --check
+expect "staged fix: pushed commit is stale"     1 env PRE_COMMIT_TO_REF=HEAD "$tool" --check
+expect "staged fix: --ref is stale"             1 "$tool" --check --ref HEAD
+git -C "$repo" reset -q --hard HEAD~1; git -C "$repo" branch -q other HEAD
+git -C "$repo" switch -q other; sed -i 's/^title: .*/title: "Other"/' "$repo/docs/specs/SPEC-001-thing.md"; commit "stale on other"
+git -C "$repo" switch -q main
+expect "pushing a stale branch from a fresh one" 1 env PRE_COMMIT_TO_REF=other "$tool" --check
+expect "pushing the fresh branch"               0 env PRE_COMMIT_TO_REF=main "$tool" --check
+echo "uncommitted" >> "$repo/docs/specs/INDEX.md"
+expect "dirty tree, fresh commit passes"        0 env PRE_COMMIT_TO_REF=HEAD "$tool" --check
+expect "unresolvable ref"                       2 env PRE_COMMIT_TO_REF=nope "$tool" --check
+expect "--ref without a value"                  2 "$tool" --check --ref
+expect "--ref without --check"                  2 "$tool" --ref HEAD
+git -C "$repo" checkout -q -- .; git -C "$repo" rm -q docs/specs/INDEX.md; commit "drop index"
+expect "index missing in commit is stale"       1 "$tool" --check --ref HEAD
+expect "rewrite ignores PRE_COMMIT_TO_REF"      0 env PRE_COMMIT_TO_REF=nope "$tool"
+
 [ "$fails" -eq 0 ] || { echo "$fails test(s) failed"; exit 1; }
 echo "all gen-index tests passed"
