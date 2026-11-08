@@ -319,7 +319,7 @@ security:sbom:
   extends: .scan-target
   stage: security
   image:
-    name: anchore/syft:v1.54.1-debug@sha256:44637d365fec8fd3ccb7310034ab64d2d5bd602c5e9bc3afd2efa5e9986b99c3
+    name: anchore/syft:v1.55.0-debug@sha256:b70ccf4e8b5d95653b4564a4beea3518ccab8017250971a799ba1fab13a276d6
     entrypoint: [""]
   variables:
     SYFT_REGISTRY_AUTH_AUTHORITY: "${CI_REGISTRY}"
