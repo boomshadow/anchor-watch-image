@@ -1,0 +1,8 @@
+name: anchored-dev checks
+description: Non-LLM Anchored Development checks. Run after actions/checkout.
+runs:
+  using: composite
+  steps:
+    - name: Spec and ADR indexes are fresh
+      shell: bash
+      run: python3 "${{ github.action_path }}/../../../tools/gen-index" --check

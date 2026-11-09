@@ -1,0 +1,28 @@
+- id: gen-index-check
+  name: spec/ADR indexes are fresh
+  description: Fails when docs/specs/INDEX.md or docs/decisions/INDEX.md is stale.
+  entry: tools/gen-index --check
+  language: script
+  minimum_pre_commit_version: '3.2.0'
+  pass_filenames: false
+  always_run: true
+  stages: [pre-push]
+- id: gen-index
+  name: regenerate spec/ADR indexes
+  description: Rewrites both INDEX.md files. Run on demand with `pre-commit run --hook-stage manual gen-index`.
+  entry: tools/gen-index
+  language: script
+  minimum_pre_commit_version: '3.2.0'
+  pass_filenames: false
+  always_run: true
+  stages: [manual]
+- id: drift-check
+  name: anchored-dev drift check (claude -p)
+  description: Asks claude -p whether the change disagrees with the specs and ADRs (SPEC-000).
+  entry: tools/drift-check
+  language: script
+  minimum_pre_commit_version: '3.2.0'
+  pass_filenames: false
+  always_run: true
+  verbose: true
+  stages: [pre-push]

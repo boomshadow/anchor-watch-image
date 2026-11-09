@@ -34,6 +34,7 @@ default:
 ############################
 stages:
   - lint
+  - test
   - build
   - security
 
@@ -119,6 +120,22 @@ lint:base-lockstep:
       fi
 
       echo "OK: build stage and runtime are both on Alpine $build_alpine."
+
+############################
+# Test
+############################
+# The pre-commit tooling in tools/ is tested with stub runners, so no model is
+# called and no credentials are needed. It runs on every validation pipeline,
+# whether or not tools/ changed: the suites take seconds.
+test:tools:
+  extends: .rules-validate
+  stage: test
+  image: python:3.14.6-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+  before_script:
+    - apk add --no-cache bash git
+  script:
+    - bash test/gen-index.sh
+    - bash test/drift-check.sh
 
 ##############################
 # Docker/Build

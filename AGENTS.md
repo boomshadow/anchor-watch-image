@@ -6,6 +6,10 @@ don't install it on every run. Claude Code itself is the official musl binary th
 vendors as a platform-specific optional dependency — it is what the SDK spawns, and it
 is symlinked onto `PATH` as `claude`.
 
+The repo is also a pre-commit hook source: `tools/` holds a local pre-push drift check
+and an index generator, published through `.pre-commit-hooks.yaml`. They are not in the
+image. `tools/README.md` is the line of truth for their behaviour.
+
 The build is two-stage: `npm ci` runs in a `node:<version>-alpine<X.Y>` stage, and the
 runtime is a bare `alpine` of the same release with the `node` binary copied in. npm is
 build-time only, so the runtime image ships no package manager. The Dockerfile is the
@@ -21,7 +25,11 @@ outside this namespace. Treat it as a reference implementation.
 ## Files
 
 - `Dockerfile` — the image definition
-- `.gitlab-ci.yml` — lint, build, release-on-tag, and security scanning
+- `.gitlab-ci.yml` — lint, tool tests, build, release-on-tag, and security scanning
+- `tools/` — `drift-check` and `gen-index`, with `tools/README.md`
+- `test/` — stub-runner tests for `tools/`, run by `test:tools`; they never call a model
+- `.pre-commit-hooks.yaml` — the hook manifest consumers reference by release tag
+- `.github/actions/check/` — GitHub Actions composite for the index check
 - `.grype.yaml` — accepted, dated vulnerability exceptions
 - `package.json` / `package-lock.json` — the Agent SDK baked into the image, and with
   it the Claude Code binary (an SDK platform package, integrity-hashed in the lockfile)
@@ -120,6 +128,10 @@ has already seen it. The repair for a bad release is the next version.
   `include: project:` resolves with the permissions of whoever runs the pipeline, so a
   private include would break CI for outside contributors and leak a private path into
   a public file. Keep them inline.
+- The drift-check tool set is `Read`, `Glob` and `Grep`, with settings, hooks and MCP
+  servers ignored. Don't widen it, and don't load project settings: the commit under
+  review controls them. Its detector instructions come from the baseline ref, never
+  from the change.
 - Bumping the Agent SDK is not routine: it is a `0.x` package, so a minor bump can
   break the drift-detector scripts that consumers run inside this image. Smoke-test
   before releasing, and consider whether it warrants a MAJOR.
