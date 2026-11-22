@@ -18,7 +18,7 @@
 # Stage 1: build. Exists to run `npm ci` and nothing else, so it installs no
 # packages -- everything the runtime needs is installed in stage 2.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:26.13.0-alpine3.24@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS build
+FROM node:26.13.1-alpine3.24@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS build
 
 WORKDIR /opt/sdk
 COPY package.json package-lock.json ./
@@ -69,9 +69,13 @@ FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c03
 # while the base digest -- and with it this layer's cache key -- never moves. The
 # weekly Grype scan against the published image is what reports that state.
 #
-# bash is required by the SHELL directive below. libstdc++ is what the copied node
-# binary links against (`ldd node` resolves musl, libstdc++ and libgcc_s, the last
-# of which comes in as a libstdc++ dependency).
+# bash is required by the SHELL directive below. libstdc++ and libatomic are what
+# the copied node binary links against beyond musl (`ldd node` also resolves
+# libgcc_s, which comes in as a libstdc++ dependency). libatomic is needed on
+# x86_64 only -- the aarch64 binary does not link it -- but it is installed on both
+# so the two platforms stay one package list. Nothing fails at build time when a
+# library is missing: node exits on start in the consumer's job, which is why
+# docker:build runs it as a smoke test.
 #
 # The `node` user is created for parity with the official node image, which also
 # creates it and also does not switch to it. Jobs still run as root: GitLab's helper
@@ -80,7 +84,7 @@ FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c03
 # non-root additionally requires FF_DISABLE_UMASK_FOR_DOCKER_EXECUTOR in every
 # consuming pipeline.
 RUN apk upgrade --no-cache \
-    && apk add --no-cache bash git libstdc++ \
+    && apk add --no-cache bash git libatomic libstdc++ \
     && addgroup -g 1000 node \
     && adduser -u 1000 -G node -s /bin/sh -D node
 

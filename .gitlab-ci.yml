@@ -151,6 +151,15 @@ lint:base-lockstep:
 # `--no-cache-filter runtime` for the same reason as the push job below: a
 # validation build that replays a stale `apk` layer is not validating what a
 # release would produce.
+#
+# The smoke test then runs the image once per platform. A missing shared library
+# never fails a build -- the copied node binary only resolves its libraries when it
+# starts, so the failure surfaces in a consumer's job instead (4.1.0 shipped without
+# libatomic this way). Each platform is loaded from the build just made: no
+# `--no-cache-filter` there, so it replays the runtime layer built above rather than
+# resolving `apk` a second time. The checks are what a drift-detector job needs:
+# node starts, the Claude Code binary runs, and the Agent SDK imports from an
+# arbitrary working directory through the /node_modules link.
 docker:build:
   extends:
     - .docker:base
@@ -164,6 +173,17 @@ docker:build:
       --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/cache-image
       --provenance=false
       -f Dockerfile .
+    - |
+      set -e
+      for platform in linux/amd64 linux/arm64; do
+        echo "--- smoke test: $platform"
+        docker buildx build --platform "$platform" --load --tag smoke-test --provenance=false -f Dockerfile .
+        docker run --rm --platform "$platform" --workdir /tmp smoke-test sh -c '
+          node --version &&
+          claude --version &&
+          node --input-type=module -e "const m = await import(\"@anthropic-ai/claude-agent-sdk\"); if (typeof m.query !== \"function\") throw new Error(\"Agent SDK query() missing\"); console.log(\"Agent SDK imports\")"
+        '
+      done
 
 # Publish a release. Tag pipelines only.
 #
